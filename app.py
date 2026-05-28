@@ -133,10 +133,57 @@ def calculate(data):
 # OCR
 # ---------------------------------------------------------------------------
 
-def parse_turkish_number(s):
-    s = s.strip().replace(".", "").replace(",", ".")
+def parse_number_flex(s):
+    """Parse a number string that may use either English or Turkish format.
+
+    English: 4,325.00  (comma=thousands, dot=decimal)
+    Turkish: 1.500,75  (dot=thousands, comma=decimal)
+
+    Heuristic: the LAST separator (comma or dot) in the string is the
+    decimal mark if there are exactly 2 digits after it; otherwise it
+    is a thousands separator and the number has no fractional part.
+    """
+    s = s.strip()
+    if not s:
+        return None
+
+    comma_idx = s.rfind(",")
+    dot_idx = s.rfind(".")
+
+    if comma_idx == -1 and dot_idx == -1:
+        # No separators at all — plain integer
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    # Determine which separator is the decimal mark
+    last_sep_idx = max(comma_idx, dot_idx)
+    last_sep_char = s[last_sep_idx]
+    digits_after = len(s) - last_sep_idx - 1
+
+    if digits_after == 2:
+        # The last separator is the decimal mark
+        decimal_char = last_sep_char
+        thousands_char = "." if decimal_char == "," else ","
+        clean = s.replace(thousands_char, "").replace(decimal_char, ".")
+    elif digits_after == 3 and comma_idx >= 0 and dot_idx >= 0:
+        # Both present, last separator has 3 digits after
+        # Treat the other one as decimal if it has 2 digits after
+        first_sep_idx = min(comma_idx, dot_idx)
+        first_digits_after = last_sep_idx - first_sep_idx - 1
+        if first_digits_after == 2:
+            decimal_char = s[first_sep_idx]
+            thousands_char = s[last_sep_idx]
+            clean = s.replace(thousands_char, "").replace(decimal_char, ".")
+        else:
+            clean = s.replace(",", "").replace(".", "")
+    else:
+        # Only one separator, or can't determine — treat all as thousands
+        clean = s.replace(",", "").replace(".", "")
+
     try:
-        return float(s)
+        return float(clean)
     except ValueError:
         return None
 
@@ -146,30 +193,51 @@ def extract_from_text(text):
     if not text:
         return None
 
-    # Normalize: replace common OCR errors
+    # Normalize encoding artifacts
     text = text.replace("|", "I")
+    text_lower = text.lower()
 
     kwh_candidates = []
     tl_candidates = []
 
     # ---- kWh detection ----
-    # Pattern: number followed by kWh (with optional space)
     for m in re.finditer(r"([\d.,]+)\s*k[wW][hH]", text):
-        val = parse_turkish_number(m.group(1))
-        if val is not None and val > 0:
-            # Get surrounding context (50 chars before)
+        val = parse_number_flex(m.group(1))
+        # Filter implausible values: must be between 5 and 50000 kWh
+        if val is not None and 5 < val < 50000:
             start = max(0, m.start() - 60)
             ctx = text[start:m.end()].lower()
+            # Exclude "önceki" references
+            is_prev = any(kw in ctx for kw in ["önceki", "nceki", "nceki fatura"])
             kwh_candidates.append({
                 "value": val,
                 "context": ctx.strip(),
                 "is_total": any(kw in ctx for kw in
                     ["toplam", "tüketim", "tuketim", "endeks", "sayaç", "sayac"]),
+                "is_prev": is_prev,
             })
 
-    # ---- TL detection ----
+    # ---- kWh: "Enerji Bedeli" nearby (BEDAŞ format) ----
+    # The first number after "Enerji Bedeli" is consumption (kWh),
+    # the second is the unit rate — only take the first.
+    for kw in ["enerji bedeli"]:
+        idx = text_lower.find(kw)
+        if idx >= 0:
+            snippet = text[idx:idx + 100]
+            numbers = list(re.finditer(r"([\d.,]+)", snippet))
+            if numbers:
+                val = parse_number_flex(numbers[0].group(1))
+                if val is not None and 5 < val < 50000:
+                    kwh_candidates.append({
+                        "value": val,
+                        "context": kw.title(),
+                        "is_total": True,
+                        "is_prev": False,
+                    })
+
+    # ---- TL detection: number + "TL" ----
     for m in re.finditer(r"([\d.,]+)\s*[Tt][Ll]", text):
-        val = parse_turkish_number(m.group(1))
+        val = parse_number_flex(m.group(1))
         if val is not None and val > 0:
             start = max(0, m.start() - 60)
             ctx = text[start:m.end()].lower()
@@ -181,26 +249,69 @@ def extract_from_text(text):
                      "borç", "borc", "tahakkuk", "öde", "ode"]),
             })
 
-    # Also scan for alternative patterns without labels
-    # Lines with just a big number might be the total
-    for m in re.finditer(r"([\d.,]+)\s*k[wW]", text):
-        val = parse_turkish_number(m.group(1))
-        if val is not None and val > 0:
+    # ---- TL detection: "Fatura Tutarı" / "Toplam" keyword nearby ----
+    for kw in ["fatura tutar", "toplam tutar", "fatura bedeli", "ödenecek tutar",
+               "toplam borç", "fatura toplam"]:
+        idx = text_lower.find(kw)
+        if idx >= 0:
+            # Scan the 200 chars after keyword for a number
+            snippet = text[idx:idx + 200]
+            for m in re.finditer(r"([\d.,]+)", snippet):
+                val = parse_number_flex(m.group(1))
+                if val is not None and val > 10:  # must be > 10 TL to be a bill
+                    tl_candidates.append({
+                        "value": val,
+                        "context": kw.title(),
+                        "is_total": True,
+                    })
+                    break  # one per keyword
+
+    # ---- kWh: "Toplam" / "Tüketim" keyword nearby (on its own line) ----
+    for kw in ["toplam(kwh)", "toplam tüketim", "dönem\ntoplam"]:
+        idx = text_lower.find(kw)
+        if idx >= 0:
+            snippet = text[idx:idx + 300]
+            # Find numbers, take the largest plausible one
+            best = None
+            for m in re.finditer(r"([\d.,]+)", snippet):
+                val = parse_number_flex(m.group(1))
+                if val is not None and 5 < val < 50000:
+                    if best is None or val > best["value"]:
+                        best = {"value": val, "context": kw.title(), "is_total": True, "is_prev": False}
+            if best:
+                kwh_candidates.append(best)
+
+    # ---- kWh: also scan for bare "kW" (without h) ----
+    for m in re.finditer(r"([\d.,]+)\s*k[wW]\b", text):
+        val = parse_number_flex(m.group(1))
+        if val is not None and 5 < val < 50000:
             start = max(0, m.start() - 60)
+            ctx = text[start:m.end()].lower().strip()
+            is_prev = any(kw in ctx for kw in ["önceki", "nceki"])
             kwh_candidates.append({
                 "value": val,
-                "context": text[start:m.end()].lower().strip(),
+                "context": ctx,
                 "is_total": False,
+                "is_prev": is_prev,
             })
 
     result = {}
 
     # ---- Pick best kWh ----
     if kwh_candidates:
-        # Prefer ones marked as total
-        totals = [c for c in kwh_candidates if c["is_total"]]
-        source = totals if totals else kwh_candidates
-        best_kwh = max(source, key=lambda c: c["value"])
+        # Exclude previous-bill references first
+        current = [c for c in kwh_candidates if not c.get("is_prev")]
+        pool = current if current else kwh_candidates
+
+        # Prefer "enerji bedeli" source (always current period consumption)
+        from_energy = [c for c in pool if "enerji bedeli" in c.get("context", "").lower()]
+        if from_energy:
+            best_kwh = max(from_energy, key=lambda c: c["value"])
+        else:
+            totals = [c for c in pool if c["is_total"]]
+            source = totals if totals else pool
+            best_kwh = max(source, key=lambda c: c["value"])
+
         result["mainMeter"] = best_kwh["value"]
         result["mainMeterContext"] = best_kwh["context"][:100]
 
