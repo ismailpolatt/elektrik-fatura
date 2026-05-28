@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elektrik Faturası Paylaştırma</title>
+<style>
+:root {
+  --primary: #1a56db;
+  --primary-hover: #1e40af;
+  --bg: #f1f5f9;
+  --surface: #ffffff;
+  --text: #1e293b;
+  --text-secondary: #64748b;
+  --border: #e2e8f0;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --success: #059669;
+  --warning: #d97706;
+  --warning-bg: #fffbeb;
+  --radius: 10px;
+  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 20px 0;
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+header h1 { font-size: 1.5rem; color: var(--text); }
+header p { font-size: .875rem; color: var(--text-secondary); margin-top: 2px; }
+
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+h2 { font-size: 1.1rem; margin-bottom: 14px; color: var(--text); }
+h3 { font-size: .95rem; margin-bottom: 8px; }
+
+.info-banner {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: .85rem;
+  color: #1e40af;
+  line-height: 1.5;
+}
+
+.form-group { margin-bottom: 12px; }
+.form-group label {
+  display: block;
+  font-size: .85rem;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+.form-group input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 16px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color .15s;
+}
+.form-group input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(26,86,219,.12);
+}
+.form-group input.error {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(220,38,38,.1);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.live-info {
+  font-size: .85rem;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  min-height: 20px;
+}
+
+.shop-subsection {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.shop-subsection h3 { display: flex; align-items: center; gap: 6px; }
+
+.emlak-auto {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+.emlak-auto .label { color: var(--text-secondary); font-size: .85rem; }
+.emlak-auto .value { font-weight: 600; font-size: 1rem; font-family: 'SF Mono','Fira Code','Consolas',monospace; }
+.hint { font-size: .78rem; color: var(--text-secondary); margin-top: 6px; font-style: italic; }
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: .9rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  transition: all .15s;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { background: #f8fafc; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover { background: #b91c1c; }
+.btn-small { padding: 6px 12px; font-size: .8rem; min-height: 32px; }
+
+.warnings { margin-bottom: 16px; }
+.warning-item {
+  background: var(--warning-bg);
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  font-size: .85rem;
+  color: var(--warning);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.error-item {
+  background: var(--danger-bg);
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  font-size: .85rem;
+  color: var(--danger);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.results-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.summary-item {
+  text-align: center;
+  font-size: .8rem;
+  color: var(--text-secondary);
+}
+.summary-item strong {
+  display: block;
+  font-size: .95rem;
+  color: var(--text);
+}
+
+.results-cards { display: grid; gap: 12px; margin-bottom: 14px; }
+
+.shop-card {
+  border: 1px solid var(--border);
+  border-top: 4px solid #ccc;
+  border-radius: 8px;
+  padding: 16px;
+}
+.shop-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.shop-card-header h3 { margin: 0; font-size: .95rem; }
+.shop-icon { font-size: 1.3rem; }
+
+.shop-consumption { font-size: 1.2rem; font-weight: 700; font-family: 'SF Mono','Fira Code','Consolas',monospace; }
+.shop-consumption.negative { color: var(--danger); }
+.shop-percentage { font-size: .85rem; color: var(--text-secondary); margin-bottom: 8px; }
+
+.progress-bar {
+  height: 8px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.progress-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+
+.shop-amount { font-size: 1.25rem; font-weight: 700; color: var(--text); font-family: 'SF Mono','Fira Code','Consolas',monospace; }
+
+.verify-row {
+  text-align: center;
+  font-size: .85rem;
+  padding: 8px;
+  border-radius: 6px;
+}
+.verify-row.match { background: #ecfdf5; color: var(--success); }
+.verify-row.mismatch { background: var(--warning-bg); color: var(--warning); }
+
+.history-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.history-info { font-size: .85rem; }
+.history-info .date { color: var(--text-secondary); font-size: .78rem; }
+.history-actions { display: flex; gap: 6px; }
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e293b;
+  color: #fff;
+  padding: 10px 24px;
+  border-radius: 20px;
+  font-size: .85rem;
+  z-index: 1000;
+  animation: toast-in .3s ease;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+footer {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-secondary);
+  font-size: .75rem;
+}
+
+/* Upload */
+.upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 18px;
+  text-align: center;
+  cursor: pointer;
+  transition: all .2s;
+  margin-bottom: 14px;
+  background: #fafbfc;
+}
+.upload-zone:hover, .upload-zone.dragover {
+  border-color: var(--primary);
+  background: #eff6ff;
+}
+.upload-zone .upload-icon { font-size: 1.6rem; margin-bottom: 4px; }
+.upload-zone .upload-text { font-size: .85rem; color: var(--text-secondary); }
+.upload-zone .upload-hint { font-size: .75rem; color: #94a3b8; margin-top: 2px; }
+.upload-zone input[type=file] { display: none; }
+
+.ocr-result {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  font-size: .85rem;
+}
+.ocr-result strong { color: var(--success); }
+.ocr-result .ocr-values { margin-top: 6px; display: flex; gap: 16px; flex-wrap: wrap; }
+.ocr-result .ocr-val { background: #fff; border-radius: 6px; padding: 6px 10px; border: 1px solid #dcfce7; }
+
+.ocr-fail {
+  background: var(--warning-bg);
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  font-size: .85rem;
+  color: var(--warning);
+}
+
+.spinner {
+  display: inline-block;
+  width: 18px; height: 18px;
+  border: 2px solid #e2e8f0;
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.uploading-text { font-size: .85rem; color: var(--text-secondary); text-align: center; padding: 8px; }
+
+@media (max-width: 500px) {
+  .form-row { grid-template-columns: 1fr; }
+  .results-summary { grid-template-columns: 1fr 1fr 1fr; }
+}
+
+@media print {
+  header, .actions, #input-section, #warnings-container, #history-section, footer, .info-banner, .toast { display: none !important; }
+  #results-section { display: block !important; box-shadow: none; border: none; padding: 0; }
+  .shop-card { break-inside: avoid; border: 1px solid #ccc; }
+  body { font-size: 12pt; color: #000; background: #fff; }
+  main { max-width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>&#x26A1; Elektrik Faturası Paylaştırma</h1>
+  <p>3 dükkan için adil paylaşım hesaplama aracı</p>
+</header>
+
+<main>
+  <div class="info-banner">
+    Hesaplama, her dükkanın tüketiminin ana sayaç tüketimine oranı üzerinden yapılır.<br>
+    Emlak Ofisi'nin alt sayacı yoktur — tüketimi, ana sayaçtan diğer iki sayacın farkı alınarak hesaplanır.
+  </div>
+
+  <section class="card" id="input-section">
+    <h2>Genel Fatura Bilgileri</h2>
+
+    <!-- OCR Upload -->
+    <div class="upload-zone" id="upload-zone">
+      <div class="upload-icon">&#x1F4C4;</div>
+      <div class="upload-text">Fatura PDF veya fotoğrafını buraya sürükleyin</div>
+      <div class="upload-hint">veya tıklayarak dosya seçin — PDF, JPG, PNG</div>
+      <input type="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.webp">
+    </div>
+    <div class="uploading-text" id="upload-status" hidden></div>
+    <div id="ocr-result-container"></div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="totalBill">Toplam Fatura Tutarı (TL)</label>
+        <input type="text" id="totalBill" inputmode="decimal" autocomplete="off" placeholder="Örn: 5.000,75">
+      </div>
+      <div class="form-group">
+        <label for="mainMeter">Ana Sayaç Tüketimi (kWh)</label>
+        <input type="text" id="mainMeter" inputmode="decimal" autocomplete="off" placeholder="Örn: 1250">
+      </div>
+    </div>
+    <div id="unit-price-preview" class="live-info"></div>
+
+    <h2 style="margin-top: 6px;">Alt Sayaç Okumaları</h2>
+
+    <div class="shop-subsection">
+      <h3>&#x1F37D;&#xFE0F; Lokanta (Restoran)</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="lokantaStart">Başlangıç Okuması (kWh)</label>
+          <input type="text" id="lokantaStart" inputmode="decimal" autocomplete="off" placeholder="Dönem başı">
+        </div>
+        <div class="form-group">
+          <label for="lokantaEnd">Bitiş Okuması (kWh)</label>
+          <input type="text" id="lokantaEnd" inputmode="decimal" autocomplete="off" placeholder="Dönem sonu">
+        </div>
+      </div>
+      <div id="lokanta-preview" class="live-info">Tüketim: -- kWh</div>
+    </div>
+
+    <div class="shop-subsection">
+      <h3>&#x1F4BA; Koltukçu (Mobilya)</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="koltukcuStart">Başlangıç Okuması (kWh)</label>
+          <input type="text" id="koltukcuStart" inputmode="decimal" autocomplete="off" placeholder="Dönem başı">
+        </div>
+        <div class="form-group">
+          <label for="koltukcuEnd">Bitiş Okuması (kWh)</label>
+          <input type="text" id="koltukcuEnd" inputmode="decimal" autocomplete="off" placeholder="Dönem sonu">
+        </div>
+      </div>
+      <div id="koltukcu-preview" class="live-info">Tüketim: -- kWh</div>
+    </div>
+
+    <div class="shop-subsection">
+      <h3>&#x1F3EA; Emlak Ofisi</h3>
+      <div class="emlak-auto">
+        <span class="label">Hesaplanan Tüketim:</span>
+        <span id="emlak-preview" class="value">-- kWh</span>
+      </div>
+      <p class="hint">* Alt sayaç bulunmadığı için otomatik hesaplanır.</p>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button id="calculateBtn" class="btn btn-primary">Hesapla</button>
+    <button id="resetBtn" class="btn btn-secondary">Temizle</button>
+  </div>
+
+  <div id="warnings-container" hidden></div>
+
+  <section id="results-section" class="card" hidden>
+    <h2>Hesaplama Sonuçları</h2>
+    <div class="results-summary">
+      <div class="summary-item">Toplam Fatura<span id="result-total-bill" style="display:block;font-weight:700;font-size:.95rem"></span></div>
+      <div class="summary-item">Toplam Tüketim<span id="result-total-consumption" style="display:block;font-weight:700;font-size:.95rem"></span></div>
+      <div class="summary-item">Birim Fiyat<span id="result-unit-price" style="display:block;font-weight:700;font-size:.95rem"></span></div>
+    </div>
+    <div class="results-cards" id="results-cards"></div>
+    <div class="verify-row" id="verify-row"></div>
+    <div class="actions" style="margin-top:14px;margin-bottom:0;">
+      <button id="saveBtn" class="btn btn-primary">&#x1F4BE; Kaydet</button>
+      <button id="printBtn" class="btn btn-secondary">&#x1F5A8;&#xFE0F; Yazdır</button>
+    </div>
+  </section>
+
+  <section id="history-section" class="card" hidden>
+    <h2>Geçmiş Hesaplamalar</h2>
+    <div id="history-list"></div>
+  </section>
+</main>
+
+<footer>
+  <p>Veriler Docker sunucunuzda SQLite veritabanında kalıcı olarak saklanır.</p>
+</footer>
+
+<div id="toast" class="toast" hidden></div>
+
+<script>
+// ============================================================
+// UTILITY FUNCTIONS
+// ============================================================
+
+function parseTurkishNumber(input) {
+  if (!input || input.trim() === '') return NaN;
+  var s = input.trim();
+  s = s.replace(/\./g, '');
+  s = s.replace(',', '.');
+  return parseFloat(s);
+}
+
+function formatTL(amount) {
+  return new Intl.NumberFormat('tr-TR', {
+    style: 'currency',
+    currency: 'TRY',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function formatNumber(n) {
+  return new Intl.NumberFormat('tr-TR', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(n);
+}
+
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(t._timeout);
+  t._timeout = setTimeout(function () { t.hidden = true; }, 2500);
+}
+
+// ============================================================
+// DOM REFS
+// ============================================================
+
+var totalBillEl = document.getElementById('totalBill');
+var mainMeterEl = document.getElementById('mainMeter');
+var lokantaStartEl = document.getElementById('lokantaStart');
+var lokantaEndEl = document.getElementById('lokantaEnd');
+var koltukcuStartEl = document.getElementById('koltukcuStart');
+var koltukcuEndEl = document.getElementById('koltukcuEnd');
+
+// ============================================================
+// LIVE PREVIEW
+// ============================================================
+
+function updateLivePreviews() {
+  var totalBill = parseTurkishNumber(totalBillEl.value) || 0;
+  var mainMeter = parseTurkishNumber(mainMeterEl.value) || 0;
+  var lStart = parseTurkishNumber(lokantaStartEl.value) || 0;
+  var lEnd = parseTurkishNumber(lokantaEndEl.value) || 0;
+  var kStart = parseTurkishNumber(koltukcuStartEl.value) || 0;
+  var kEnd = parseTurkishNumber(koltukcuEndEl.value) || 0;
+
+  var lCons = lEnd - lStart;
+  var kCons = kEnd - kStart;
+  var eCons = mainMeter - lCons - kCons;
+
+  document.getElementById('lokanta-preview').textContent =
+    'Tüketim: ' + (lEnd >= lStart ? formatNumber(lCons) + ' kWh' : '-- kWh (kontrol edin)');
+  document.getElementById('koltukcu-preview').textContent =
+    'Tüketim: ' + (kEnd >= kStart ? formatNumber(kCons) + ' kWh' : '-- kWh (kontrol edin)');
+  document.getElementById('emlak-preview').textContent =
+    mainMeter > 0 ? formatNumber(eCons) + ' kWh' : '-- kWh';
+
+  var upEl = document.getElementById('unit-price-preview');
+  if (mainMeter > 0 && totalBill > 0) {
+    upEl.textContent = 'Birim Fiyat: ' + formatTL(totalBill / mainMeter) + ' / kWh';
+  } else {
+    upEl.textContent = '';
+  }
+}
+
+function readInputs() {
+  return {
+    totalBill: parseTurkishNumber(totalBillEl.value),
+    mainMeter: parseTurkishNumber(mainMeterEl.value),
+    lokantaStart: parseTurkishNumber(lokantaStartEl.value),
+    lokantaEnd: parseTurkishNumber(lokantaEndEl.value),
+    koltukcuStart: parseTurkishNumber(koltukcuStartEl.value),
+    koltukcuEnd: parseTurkishNumber(koltukcuEndEl.value),
+  };
+}
+
+function validateInputs(d) {
+  var errors = [];
+  var fields = [
+    { key: 'totalBill', el: totalBillEl, label: 'Toplam Fatura Tutarı' },
+    { key: 'mainMeter', el: mainMeterEl, label: 'Ana Sayaç Tüketimi' },
+    { key: 'lokantaStart', el: lokantaStartEl, label: 'Lokanta Başlangıç' },
+    { key: 'lokantaEnd', el: lokantaEndEl, label: 'Lokanta Bitiş' },
+    { key: 'koltukcuStart', el: koltukcuStartEl, label: 'Koltukçu Başlangıç' },
+    { key: 'koltukcuEnd', el: koltukcuEndEl, label: 'Koltukçu Bitiş' },
+  ];
+
+  // Clear previous errors
+  document.querySelectorAll('input.error').forEach(function (el) { el.classList.remove('error'); });
+
+  for (var i = 0; i < fields.length; i++) {
+    var f = fields[i];
+    if (f.el.value.trim() === '') {
+      errors.push(f.label + ' alanı zorunludur.');
+      f.el.classList.add('error');
+    } else if (isNaN(d[f.key])) {
+      errors.push(f.label + ' için geçerli bir sayı giriniz.');
+      f.el.classList.add('error');
+    }
+  }
+
+  if (errors.length > 0) return errors;
+
+  if (d.totalBill <= 0) errors.push('Fatura tutarı sıfırdan büyük olmalıdır.');
+  if (d.mainMeter <= 0) errors.push('Ana sayaç tüketimi sıfırdan büyük olmalıdır.');
+  if (d.lokantaStart < 0 || d.lokantaEnd < 0 || d.koltukcuStart < 0 || d.koltukcuEnd < 0) {
+    errors.push('Sayaç değerleri negatif olamaz.');
+  }
+
+  return errors;
+}
+
+// ============================================================
+// API CALLS
+// ============================================================
+
+function apiPost(data) {
+  return fetch('/api/calculations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); });
+}
+
+function apiList() {
+  return fetch('/api/calculations').then(function (r) { return r.json(); });
+}
+
+function apiDelete(id) {
+  return fetch('/api/calculations/' + id, { method: 'DELETE' });
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+
+function createShopCard(shop) {
+  var barWidth = Math.max(0, Math.min(100, shop.percentage));
+  var isNeg = shop.consumption < 0;
+  return (
+    '<div class="shop-card" style="border-top-color:' + shop.color + '">' +
+      '<div class="shop-card-header">' +
+        '<span class="shop-icon">' + shop.icon + '</span>' +
+        '<h3>' + shop.name + '</h3>' +
+      '</div>' +
+      '<div class="shop-card-body">' +
+        '<div class="shop-consumption' + (isNeg ? ' negative' : '') + '">' + formatNumber(shop.consumption) + ' kWh</div>' +
+        '<div class="shop-percentage">%' + formatNumber(shop.percentage) + '</div>' +
+        '<div class="progress-bar"><div class="progress-fill" style="width:' + barWidth + '%;background:' + shop.color + '"></div></div>' +
+        '<div class="shop-amount">' + formatTL(shop.amount) + '</div>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function renderResults(result) {
+  document.getElementById('result-total-bill').textContent = formatTL(result.totalBill);
+  document.getElementById('result-total-consumption').textContent = formatNumber(result.mainMeter) + ' kWh';
+  document.getElementById('result-unit-price').textContent = formatTL(result.unitPrice) + ' / kWh';
+
+  var cardsHtml = '';
+  for (var i = 0; i < result.shops.length; i++) {
+    cardsHtml += createShopCard(result.shops[i]);
+  }
+  document.getElementById('results-cards').innerHTML = cardsHtml;
+
+  var totalCalc = 0;
+  for (var j = 0; j < result.shops.length; j++) {
+    totalCalc += result.shops[j].amount;
+  }
+  var diff = Math.abs(totalCalc - result.totalBill);
+  var verifyEl = document.getElementById('verify-row');
+  verifyEl.textContent = 'Dükkan toplamları: ' + formatTL(totalCalc) +
+    '  |  Fatura: ' + formatTL(result.totalBill);
+  if (diff < 0.05) {
+    verifyEl.textContent += '  — Toplamlar eşleşiyor.';
+    verifyEl.className = 'verify-row match';
+  } else {
+    verifyEl.textContent += '  — Yuvarlama farkı: ' + formatTL(diff);
+    verifyEl.className = 'verify-row mismatch';
+  }
+
+  document.getElementById('results-section').hidden = false;
+  window._lastResult = result;
+  window._lastInputs = readInputs();
+}
+
+function renderWarnings(warnings) {
+  var container = document.getElementById('warnings-container');
+  if (!warnings || warnings.length === 0) {
+    container.innerHTML = '';
+    container.hidden = true;
+    return;
+  }
+  container.innerHTML = '';
+  for (var i = 0; i < warnings.length; i++) {
+    var div = document.createElement('div');
+    div.className = 'warning-item';
+    div.textContent = '⚠️ ' + warnings[i];
+    container.appendChild(div);
+  }
+  container.hidden = false;
+}
+
+function renderErrors(errors) {
+  var container = document.getElementById('warnings-container');
+  container.innerHTML = '';
+  for (var i = 0; i < errors.length; i++) {
+    var div = document.createElement('div');
+    div.className = 'error-item';
+    div.textContent = '❌ ' + errors[i];
+    container.appendChild(div);
+  }
+  container.hidden = false;
+}
+
+function renderHistory(items) {
+  var section = document.getElementById('history-section');
+  var list = document.getElementById('history-list');
+
+  if (!items || items.length === 0) {
+    section.hidden = true;
+    return;
+  }
+
+  section.hidden = false;
+  list.innerHTML = '';
+
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var div = document.createElement('div');
+    div.className = 'history-item';
+    div.innerHTML =
+      '<div class="history-info">' +
+        '<strong>' + formatTL(item.total_bill) + '</strong> — ' +
+        formatNumber(item.main_meter) + ' kWh' +
+        '<div class="date">' + item.created_at + '</div>' +
+        '<div style="font-size:.78rem;margin-top:2px;">' +
+          'Lokanta: ' + formatTL(item.lokanta_amount) +
+          ' | Koltukçu: ' + formatTL(item.koltukcu_amount) +
+          ' | Emlak: ' + formatTL(item.emlak_amount) +
+        '</div>' +
+      '</div>' +
+      '<div class="history-actions">' +
+        '<button class="btn btn-secondary btn-small load-btn" data-id="' + item.id + '">Yükle</button>' +
+        '<button class="btn btn-danger btn-small delete-btn" data-id="' + item.id + '">Sil</button>' +
+      '</div>';
+    list.appendChild(div);
+  }
+}
+
+// ============================================================
+// EVENT HANDLERS
+// ============================================================
+
+function handleCalculate() {
+  var inputs = readInputs();
+  var errors = validateInputs(inputs);
+
+  if (errors.length > 0) {
+    renderErrors(errors);
+    document.getElementById('results-section').hidden = true;
+    return;
+  }
+
+  apiPost(inputs).then(function (res) {
+    if (res.status === 400) {
+      renderErrors(res.body.errors || ['Hesaplama hatası.']);
+      document.getElementById('results-section').hidden = true;
+      return;
+    }
+
+    document.getElementById('warnings-container').hidden = true;
+    renderResults(res.body);
+
+    if (res.body.warnings && res.body.warnings.length > 0) {
+      renderWarnings(res.body.warnings);
+    }
+
+    document.getElementById('results-section').scrollIntoView({ behavior: 'smooth' });
+  }).catch(function () {
+    renderErrors(['Sunucuya bağlanılamadı. Lütfen daha sonra tekrar deneyin.']);
+  });
+}
+
+function handleSave() {
+  if (!window._lastResult || !window._lastResult.id) {
+    showToast('Önce hesaplama yapmalısınız.');
+    return;
+  }
+  showToast('Hesaplama kaydedildi.');
+  loadHistory();
+}
+
+function handleReset() {
+  var inputs = document.querySelectorAll('input[type="text"]');
+  for (var i = 0; i < inputs.length; i++) { inputs[i].value = ''; }
+  document.querySelectorAll('input.error').forEach(function (el) { el.classList.remove('error'); });
+  document.getElementById('results-section').hidden = true;
+  document.getElementById('warnings-container').hidden = true;
+  updateLivePreviews();
+  window._lastResult = null;
+  window._lastInputs = null;
+}
+
+function handlePrint() {
+  window.print();
+}
+
+function loadHistory() {
+  apiList().then(function (items) {
+    renderHistory(items);
+  }).catch(function () {});
+}
+
+function handleListClick(e) {
+  var target = e.target;
+  if (target.classList.contains('load-btn')) {
+    var id = target.getAttribute('data-id');
+    loadEntry(id);
+  } else if (target.classList.contains('delete-btn')) {
+    var id2 = target.getAttribute('data-id');
+    deleteEntry(id2);
+  }
+}
+
+function loadEntry(id) {
+  fetch('/api/calculations').then(function (r) { return r.json(); }).then(function (items) {
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].id == id) {
+        var item = items[i];
+        totalBillEl.value = item.total_bill.toString().replace('.', ',');
+        mainMeterEl.value = item.main_meter.toString().replace('.', ',');
+        lokantaStartEl.value = item.lokanta_start.toString().replace('.', ',');
+        lokantaEndEl.value = item.lokanta_end.toString().replace('.', ',');
+        koltukcuStartEl.value = item.koltukcu_start.toString().replace('.', ',');
+        koltukcuEndEl.value = item.koltukcu_end.toString().replace('.', ',');
+        updateLivePreviews();
+        handleCalculate();
+        return;
+      }
+    }
+  });
+}
+
+function deleteEntry(id) {
+  apiDelete(id).then(function () {
+    showToast('Kayıt silindi.');
+    loadHistory();
+  });
+}
+
+// ============================================================
+// OCR UPLOAD
+// ============================================================
+
+var uploadZone = document.getElementById('upload-zone');
+var fileInput = document.getElementById('file-input');
+var uploadStatus = document.getElementById('upload-status');
+var ocrResultContainer = document.getElementById('ocr-result-container');
+
+uploadZone.addEventListener('click', function () { fileInput.click(); });
+fileInput.addEventListener('change', function () {
+  if (fileInput.files.length > 0) handleFile(fileInput.files[0]);
+});
+
+uploadZone.addEventListener('dragover', function (e) {
+  e.preventDefault();
+  uploadZone.classList.add('dragover');
+});
+uploadZone.addEventListener('dragleave', function () {
+  uploadZone.classList.remove('dragover');
+});
+uploadZone.addEventListener('drop', function (e) {
+  e.preventDefault();
+  uploadZone.classList.remove('dragover');
+  var file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+});
+
+function handleFile(file) {
+  var ext = file.name.split('.').pop().toLowerCase();
+  var allowed = ['pdf', 'jpg', 'jpeg', 'png', 'bmp', 'tiff', 'webp'];
+  if (allowed.indexOf(ext) === -1) {
+    renderOcrError('Desteklenmeyen dosya formatı. PDF veya resim (JPG, PNG) yükleyin.');
+    return;
+  }
+
+  uploadStatus.hidden = false;
+  uploadStatus.innerHTML = '<span class="spinner"></span> Fatura okunuyor, lütfen bekleyin...';
+  ocrResultContainer.innerHTML = '';
+
+  var formData = new FormData();
+  formData.append('file', file);
+
+  fetch('/api/upload', { method: 'POST', body: formData })
+    .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); })
+    .then(function (res) {
+      uploadStatus.hidden = true;
+      if (res.status === 200 || res.status === 201) {
+        var body = res.body;
+        renderOcrSuccess(body);
+        if (body.totalBill) {
+          totalBillEl.value = body.totalBill.toString().replace('.', ',');
+        }
+        if (body.mainMeter) {
+          mainMeterEl.value = body.mainMeter.toString().replace('.', ',');
+        }
+        updateLivePreviews();
+        showToast('Fatura değerleri otomatik dolduruldu. Kontrol edip hesaplayabilirsiniz.');
+      } else {
+        renderOcrError(body.error || 'OCR işlemi başarısız.');
+      }
+    })
+    .catch(function () {
+      uploadStatus.hidden = true;
+      renderOcrError('Sunucuya bağlanılamadı. Lütfen daha sonra tekrar deneyin.');
+    });
+}
+
+function renderOcrSuccess(body) {
+  var html = '<div class="ocr-result"><strong>&#x2713; Fatura okundu</strong>';
+  html += '<div class="ocr-values">';
+  if (body.totalBill) {
+    html += '<div class="ocr-val">Fatura: <strong>' + formatTL(body.totalBill) + '</strong></div>';
+  }
+  if (body.mainMeter) {
+    html += '<div class="ocr-val">Tüketim: <strong>' + formatNumber(body.mainMeter) + ' kWh</strong></div>';
+  }
+  html += '</div></div>';
+  ocrResultContainer.innerHTML = html;
+}
+
+function renderOcrError(msg) {
+  ocrResultContainer.innerHTML = '<div class="ocr-fail">&#x26A0; ' + msg + '</div>';
+}
+
+// ============================================================
+// INIT
+// ============================================================
+
+document.getElementById('calculateBtn').addEventListener('click', handleCalculate);
+document.getElementById('resetBtn').addEventListener('click', handleReset);
+document.getElementById('saveBtn').addEventListener('click', handleSave);
+document.getElementById('printBtn').addEventListener('click', handlePrint);
+document.getElementById('history-list').addEventListener('click', handleListClick);
+
+var allInputs = [totalBillEl, mainMeterEl, lokantaStartEl, lokantaEndEl, koltukcuStartEl, koltukcuEndEl];
+for (var i = 0; i < allInputs.length; i++) {
+  allInputs[i].addEventListener('input', updateLivePreviews);
+  allInputs[i].addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { handleCalculate(); }
+  });
+}
+
+loadHistory();
+</script>
+
+</body>
+</html>
