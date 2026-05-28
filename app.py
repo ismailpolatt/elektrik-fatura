@@ -454,6 +454,72 @@ def upload_and_ocr():
     return jsonify(result)
 
 
+def ocr_meter_display(image_bytes):
+    """Extract meter reading from a photo using Tesseract OCR."""
+    try:
+        from PIL import Image
+        import pytesseract
+    except ImportError:
+        return None
+
+    img = Image.open(io.BytesIO(image_bytes))
+    if img.mode in ("RGBA", "P", "LA"):
+        img = img.convert("RGB")
+
+    # Strategy 1: digit-only OCR, look for 4-8 digit numbers
+    try:
+        digits = pytesseract.image_to_string(
+            img, config="--psm 6 -c tessedit_char_whitelist=0123456789"
+        )
+        # Find all number groups, take the longest plausible one
+        numbers = re.findall(r"\d{4,8}", digits)
+        if numbers:
+            best = max(numbers, key=lambda n: len(n))
+            return float(best) if len(best) <= 6 else float(best[:6])
+    except Exception:
+        pass
+
+    # Strategy 2: full OCR with Turkish, find numbers near keywords
+    try:
+        text = pytesseract.image_to_string(img, lang="tur")
+        # Look for kWh label near a number
+        for m in re.finditer(r"([\d.,]+)\s*k[wW]", text):
+            val = parse_number_flex(m.group(1))
+            if val is not None and val > 0:
+                return val
+        # Fallback: find any 4-8 digit number
+        numbers = re.findall(r"\d{4,8}", text.replace(" ", "").replace("\n", ""))
+        if numbers:
+            best = max(numbers, key=lambda n: len(n))
+            return float(best) if len(best) <= 6 else float(best[:6])
+    except Exception:
+        pass
+
+    return None
+
+
+@app.route("/api/meter-ocr", methods=["POST"])
+def meter_ocr():
+    """Read a meter value from an uploaded photo."""
+    if "file" not in request.files:
+        return jsonify({"error": "Dosya bulunamadı."}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "Dosya seçilmedi."}), 400
+
+    file_bytes = file.read()
+    if len(file_bytes) == 0:
+        return jsonify({"error": "Dosya boş."}), 400
+
+    value = ocr_meter_display(file_bytes)
+
+    if value is None:
+        return jsonify({"error": "Sayaç değeri okunamadı. Lütfen manuel giriniz."}), 422
+
+    return jsonify({"value": value})
+
+
 @app.route("/api/last-readings", methods=["GET"])
 def last_readings():
     """Return the most recent end readings to auto-fill start fields."""
