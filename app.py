@@ -454,6 +454,23 @@ def upload_and_ocr():
     return jsonify(result)
 
 
+@app.route("/api/last-readings", methods=["GET"])
+def last_readings():
+    """Return the most recent end readings to auto-fill start fields."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT lokanta_end, koltukcu_end, created_at FROM calculations ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    if row:
+        return jsonify({
+            "lokantaEnd": row["lokanta_end"],
+            "koltukcuEnd": row["koltukcu_end"],
+            "date": row["created_at"],
+        })
+    return jsonify({})
+
+
 @app.route("/api/calculations", methods=["GET"])
 def list_calculations():
     conn = get_db()

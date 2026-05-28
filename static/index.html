@@ -768,7 +768,7 @@ function handleSave() {
 
 function handleReset() {
   var inputs = document.querySelectorAll('input[type="text"]');
-  for (var i = 0; i < inputs.length; i++) { inputs[i].value = ''; }
+  for (var i = 0; i < inputs.length; i++) { inputs[i].value = ''; inputs[i].style.background = ''; }
   document.querySelectorAll('input.error').forEach(function (el) { el.classList.remove('error'); });
   document.getElementById('results-section').hidden = true;
   document.getElementById('warnings-container').hidden = true;
@@ -785,6 +785,26 @@ function loadHistory() {
   apiList().then(function (items) {
     renderHistory(items);
   }).catch(function () {});
+}
+
+function fetchLastReadings() {
+  fetch('/api/last-readings')
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.lokantaEnd !== undefined) {
+        lokantaStartEl.value = data.lokantaEnd.toString().replace('.', ',');
+        lokantaStartEl.style.background = '#f0fdf4';
+        document.getElementById('lokanta-preview').textContent =
+          'Tuketim: -- kWh (baslangic ' + data.date + ' tarihli kayittan)';
+      }
+      if (data.koltukcuEnd !== undefined) {
+        koltukcuStartEl.value = data.koltukcuEnd.toString().replace('.', ',');
+        koltukcuStartEl.style.background = '#f0fdf4';
+        document.getElementById('koltukcu-preview').textContent =
+          'Tuketim: -- kWh (baslangic ' + data.date + ' tarihli kayittan)';
+      }
+      updateLivePreviews();
+    }).catch(function () {});
 }
 
 function handleListClick(e) {
@@ -928,6 +948,7 @@ for (var i = 0; i < allInputs.length; i++) {
 }
 
 loadHistory();
+fetchLastReadings();
 </script>
 
 </body>
