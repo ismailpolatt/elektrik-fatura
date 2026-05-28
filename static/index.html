@@ -330,14 +330,6 @@ footer {
 @keyframes spin { to { transform: rotate(360deg); } }
 .uploading-text { font-size: .85rem; color: var(--text-secondary); text-align: center; padding: 8px; }
 
-.meter-input-row { display: flex; gap: 6px; align-items: center; }
-.btn-meter {
-  min-height: 44px; width: 44px; padding: 0;
-  font-size: 1.1rem; justify-content: center;
-  flex-shrink: 0;
-}
-.btn-meter.loading { opacity: .6; pointer-events: none; }
-
 @media (max-width: 500px) {
   .form-row { grid-template-columns: 1fr; }
   .results-summary { grid-template-columns: 1fr 1fr 1fr; }
@@ -401,11 +393,7 @@ footer {
         </div>
         <div class="form-group">
           <label for="lokantaEnd">Bitiş Okuması (kWh)</label>
-          <div class="meter-input-row">
-            <input type="text" id="lokantaEnd" inputmode="decimal" autocomplete="off" placeholder="Dönem sonu" style="flex:1">
-            <button class="btn btn-secondary btn-meter" id="lokanta-meter-btn" type="button" title="Sayaç fotoğrafı yükle">&#x1F4F7;</button>
-            <input type="file" id="lokanta-meter-file" accept=".jpg,.jpeg,.png" hidden>
-          </div>
+          <input type="text" id="lokantaEnd" inputmode="decimal" autocomplete="off" placeholder="Dönem sonu">
         </div>
       </div>
       <div id="lokanta-preview" class="live-info">Tüketim: -- kWh</div>
@@ -420,11 +408,7 @@ footer {
         </div>
         <div class="form-group">
           <label for="koltukcuEnd">Bitiş Okuması (kWh)</label>
-          <div class="meter-input-row">
-            <input type="text" id="koltukcuEnd" inputmode="decimal" autocomplete="off" placeholder="Dönem sonu" style="flex:1">
-            <button class="btn btn-secondary btn-meter" id="koltukcu-meter-btn" type="button" title="Sayaç fotoğrafı yükle">&#x1F4F7;</button>
-            <input type="file" id="koltukcu-meter-file" accept=".jpg,.jpeg,.png" hidden>
-          </div>
+          <input type="text" id="koltukcuEnd" inputmode="decimal" autocomplete="off" placeholder="Dönem sonu">
         </div>
       </div>
       <div id="koltukcu-preview" class="live-info">Tüketim: -- kWh</div>
@@ -946,48 +930,6 @@ function renderOcrError(msg) {
 }
 
 // ============================================================
-// METER OCR (sayaç fotoğrafı okuma)
-// ============================================================
-
-function setupMeterOcr(shopId, fileInputId, btnId, targetInput) {
-  var fileInput = document.getElementById(fileInputId);
-  var btn = document.getElementById(btnId);
-
-  btn.addEventListener('click', function () { fileInput.click(); });
-
-  fileInput.addEventListener('change', function () {
-    if (!fileInput.files.length) return;
-    var file = fileInput.files[0];
-
-    btn.classList.add('loading');
-    btn.textContent = '...';
-
-    var formData = new FormData();
-    formData.append('file', file);
-
-    fetch('/api/meter-ocr', { method: 'POST', body: formData })
-      .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); })
-      .then(function (res) {
-        btn.classList.remove('loading');
-        btn.innerHTML = '&#x1F4F7;';
-        if (res.status === 200 && res.body.value) {
-          targetInput.value = res.body.value.toString().replace('.', ',');
-          targetInput.style.background = '#f0fdf4';
-          updateLivePreviews();
-          showToast(shopId + ' sayaç değeri okundu: ' + res.body.value);
-        } else {
-          showToast(res.body.error || 'Sayaç okunamadı.');
-        }
-      })
-      .catch(function () {
-        btn.classList.remove('loading');
-        btn.innerHTML = '&#x1F4F7;';
-        showToast('Sunucuya bağlanılamadı.');
-      });
-  });
-}
-
-// ============================================================
 // INIT
 // ============================================================
 
@@ -996,10 +938,6 @@ document.getElementById('resetBtn').addEventListener('click', handleReset);
 document.getElementById('saveBtn').addEventListener('click', handleSave);
 document.getElementById('printBtn').addEventListener('click', handlePrint);
 document.getElementById('history-list').addEventListener('click', handleListClick);
-
-// Meter OCR setup
-setupMeterOcr('Lokanta', 'lokanta-meter-file', 'lokanta-meter-btn', lokantaEndEl);
-setupMeterOcr('Koltukcu', 'koltukcu-meter-file', 'koltukcu-meter-btn', koltukcuEndEl);
 
 var allInputs = [totalBillEl, mainMeterEl, lokantaStartEl, lokantaEndEl, koltukcuStartEl, koltukcuEndEl];
 for (var i = 0; i < allInputs.length; i++) {
