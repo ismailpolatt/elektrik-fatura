@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+
+<html class="light" lang="tr"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Energy Insight - Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Shared Component Styling Hook -->
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f9f9fb;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-primary": "#ffffff",
+                        "surface-container": "#eeeef0",
+                        "on-tertiary": "#ffffff",
+                        "surface-container-highest": "#e2e2e4",
+                        "inverse-surface": "#2f3132",
+                        "on-secondary-fixed-variant": "#544600",
+                        "secondary-fixed": "#ffe16d",
+                        "on-surface-variant": "#454652",
+                        "surface-container-high": "#e8e8ea",
+                        "surface-container-lowest": "#ffffff",
+                        "primary-fixed-dim": "#bdc2ff",
+                        "tertiary-fixed": "#98f994",
+                        "secondary-fixed-dim": "#e9c400",
+                        "on-primary-fixed-variant": "#343d96",
+                        "tertiary": "#002104",
+                        "primary-fixed": "#e0e0ff",
+                        "on-tertiary-fixed-variant": "#005313",
+                        "on-secondary-fixed": "#221b00",
+                        "tertiary-container": "#00390a",
+                        "outline": "#767683",
+                        "secondary-container": "#fcd400",
+                        "on-background": "#1a1c1d",
+                        "inverse-on-surface": "#f0f0f2",
+                        "on-primary-container": "#8690ee",
+                        "on-secondary-container": "#6e5c00",
+                        "primary": "#000666",
+                        "on-error": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "on-tertiary-fixed": "#002204",
+                        "secondary": "#705d00",
+                        "error-container": "#ffdad6",
+                        "surface-container-low": "#f3f3f5",
+                        "surface": "#f9f9fb",
+                        "error": "#ba1a1a",
+                        "surface-dim": "#d9dadc",
+                        "on-surface": "#1a1c1d",
+                        "on-error-container": "#93000a",
+                        "tertiary-fixed-dim": "#7ddc7a",
+                        "on-tertiary-container": "#4eab50",
+                        "primary-container": "#1a237e",
+                        "background": "#f9f9fb",
+                        "surface-variant": "#e2e2e4",
+                        "inverse-primary": "#bdc2ff",
+                        "surface-tint": "#4c56af",
+                        "on-primary-fixed": "#000767",
+                        "surface-bright": "#f9f9fb",
+                        "outline-variant": "#c6c5d4"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "gutter": "16px",
+                        "container-padding-desktop": "32px",
+                        "card-gap": "24px",
+                        "container-padding-mobile": "16px",
+                        "base": "8px"
+                    },
+                    "fontFamily": {
+                        "headline-lg-mobile": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "body-md": ["Inter"],
+                        "label-sm": ["JetBrains Mono"],
+                        "headline-lg": ["Inter"],
+                        "data-lg": ["Inter"],
+                        "title-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                        "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "label-sm": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "data-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                        "title-md": ["18px", {"lineHeight": "24px", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background selection:bg-secondary-container">
+<!-- Top Navigation Anchor (As per JSON) -->
+<header class="flex justify-between items-center px-container-padding-mobile md:px-container-padding-desktop h-16 w-full bg-surface border-b border-outline-variant sticky top-0 z-50">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-3xl" data-icon="electric_meter">electric_meter</span>
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile font-bold text-primary">Energy Insight</h1>
+</div>
+<div class="hidden md:flex gap-8 items-center">
+<nav class="flex gap-6">
+<a class="font-title-md text-primary font-semibold" href="#">Home</a>
+<a class="font-title-md text-on-surface-variant hover:text-primary transition-colors" href="#">Meters</a>
+<a class="font-title-md text-on-surface-variant hover:text-primary transition-colors" href="#">History</a>
+<a class="font-title-md text-on-surface-variant hover:text-primary transition-colors" href="#">Settings</a>
+</nav>
+<button class="bg-primary-container text-on-primary px-6 py-2 rounded-lg font-title-md hover:opacity-90 transition-opacity">
+                Yeni Okuma Gir
+            </button>
+</div>
+<div class="md:hidden">
+<span class="material-symbols-outlined text-on-surface" data-icon="menu">menu</span>
+</div>
+</header>
+<main class="max-w-7xl mx-auto px-container-padding-mobile md:px-container-padding-desktop py-8 mb-24">
+<!-- Hero Section: Total Main Meter -->
+<section class="relative overflow-hidden rounded-xl bg-primary-container p-8 md:p-12 mb-10 text-on-primary shadow-lg group">
+<div class="relative z-10">
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
+<div>
+<p class="font-label-sm text-label-sm uppercase tracking-widest text-on-primary-container/80 mb-2">TOPLAM ELEKTRİK BEDELİ</p>
+<h2 class="font-display-lg text-display-lg mb-1 flex items-center gap-2">
+<span class="text-secondary-fixed">₺</span>12.450,80
+                        </h2>
+<p class="font-body-md text-body-md text-on-primary-container/90">Ağustos 2023 Dönemi</p>
+</div>
+<div class="flex gap-4">
+<button class="bg-secondary-container text-on-secondary-container px-8 py-3 rounded font-title-md font-bold hover:scale-105 transition-transform flex items-center gap-2">
+<span class="material-symbols-outlined" data-icon="add_circle">add_circle</span>
+                            Yeni Okuma Gir
+                        </button>
+</div>
+</div>
+</div>
+</section>
+<!-- Shop Cards: Bento Layout -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-card-gap">
+<!-- Shop 1 (Ana) -->
+<div class="bg-white border border-outline-variant p-6 rounded-xl hover:shadow-md transition-shadow relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-4">
+<span class="bg-primary-container text-on-primary text-[10px] px-2 py-1 rounded font-bold uppercase tracking-tighter">ANA DÜKKAN</span>
+</div>
+<div class="flex items-center gap-3 mb-6">
+<div class="w-12 h-12 rounded-lg bg-surface-container flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-3xl" data-icon="storefront">storefront</span>
+</div>
+<div>
+<h3 class="font-title-md text-title-md text-on-background">Dükkan 1</h3>
+<p class="font-label-sm text-label-sm text-outline">S/N: 0049210-A</p>
+</div>
+</div>
+<div class="space-y-4 mb-8">
+<div class="flex justify-between items-end">
+<span class="font-label-sm text-label-sm text-on-surface-variant">GÜNCEL OKUMA</span>
+<span class="font-data-lg text-data-lg mono">42.109,2</span>
+</div>
+<div class="h-2 w-full bg-surface-container rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full transition-all duration-1000" style="width: 65%;"></div>
+</div>
+<div class="flex justify-between text-on-surface-variant">
+<div class="flex flex-col items-end">
+<span class="text-[11px] font-bold uppercase tracking-wide">Pay (₺)</span>
+<span class="font-data-lg text-data-lg mono text-primary">₺5.420,15</span>
+</div>
+</div>
+</div>
+<button class="w-full py-2 border border-outline text-primary font-semibold rounded-lg hover:bg-surface-container-low transition-colors text-sm">
+                    Detayları Görüntüle
+                </button>
+</div>
+<!-- Shop 2 (Süzme) -->
+<div class="bg-white border border-outline-variant p-6 rounded-xl hover:shadow-md transition-shadow relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-4">
+<span class="bg-surface-container text-on-surface-variant text-[10px] px-2 py-1 rounded font-bold uppercase tracking-tighter border border-outline-variant">SÜZME</span>
+</div>
+<div class="flex items-center gap-3 mb-6">
+<div class="w-12 h-12 rounded-lg bg-surface-container flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined text-3xl" data-icon="shopping_bag">shopping_bag</span>
+</div>
+<div>
+<h3 class="font-title-md text-title-md text-on-background">Dükkan 2</h3>
+<p class="font-label-sm text-label-sm text-outline">S/N: 0038812-B</p>
+</div>
+</div>
+<div class="space-y-4 mb-8">
+<div class="flex justify-between items-end">
+<span class="font-label-sm text-label-sm text-on-surface-variant">GÜNCEL OKUMA</span>
+<span class="font-data-lg text-data-lg mono">12.554,8</span>
+</div>
+<div class="h-2 w-full bg-surface-container rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full transition-all duration-1000" style="width: 25%;"></div>
+</div>
+<div class="flex justify-between text-on-surface-variant">
+<div class="flex flex-col items-end">
+<span class="text-[11px] font-bold uppercase tracking-wide">Pay (₺)</span>
+<span class="font-data-lg text-data-lg mono text-primary">₺3.512,20</span>
+</div>
+</div>
+</div>
+<button class="w-full py-2 border border-outline text-primary font-semibold rounded-lg hover:bg-surface-container-low transition-colors text-sm">
+                    Detayları Görüntüle
+                </button>
+</div>
+<!-- Shop 3 (Süzme) -->
+<div class="bg-white border border-outline-variant p-6 rounded-xl hover:shadow-md transition-shadow relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-4">
+<span class="bg-surface-container text-on-surface-variant text-[10px] px-2 py-1 rounded font-bold uppercase tracking-tighter border border-outline-variant">SÜZME</span>
+</div>
+<div class="flex items-center gap-3 mb-6">
+<div class="w-12 h-12 rounded-lg bg-surface-container flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined text-3xl" data-icon="local_cafe">local_cafe</span>
+</div>
+<div>
+<h3 class="font-title-md text-title-md text-on-background">Dükkan 3</h3>
+<p class="font-label-sm text-label-sm text-outline">S/N: 0091224-C</p>
+</div>
+</div>
+<div class="space-y-4 mb-8">
+<div class="flex justify-between items-end">
+<span class="font-label-sm text-label-sm text-on-surface-variant">GÜNCEL OKUMA</span>
+<span class="font-data-lg text-data-lg mono">18.922,4</span>
+</div>
+<div class="h-2 w-full bg-surface-container rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full transition-all duration-1000" style="width: 38%;"></div>
+</div>
+<div class="flex justify-between text-on-surface-variant">
+<div class="flex flex-col items-end">
+<span class="text-[11px] font-bold uppercase tracking-wide">Pay (₺)</span>
+<span class="font-data-lg text-data-lg mono text-primary">₺3.518,45</span>
+</div>
+</div>
+</div>
+<button class="w-full py-2 border border-outline text-primary font-semibold rounded-lg hover:bg-surface-container-low transition-colors text-sm">
+                    Detayları Görüntüle
+                </button>
+</div>
+</div>
+<!-- Secondary Insights Section -->
+<section class="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-card-gap">
+<div class="bg-surface border border-outline-variant rounded-xl p-6">
+<h4 class="font-title-md text-title-md mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary" data-icon="trending_up">trending_up</span>
+                    Kullanım Analizi
+                </h4>
+<div class="space-y-6">
+<div class="flex items-center gap-4">
+<div class="w-full h-40 bg-cover bg-center rounded-lg opacity-80" data-alt="A clean, minimalist bar chart showing monthly energy consumption trends for a commercial property. The bars are primary navy blue against a soft grey background, showing a slight upward trend towards the summer months. The style is professional, data-centric, and corporate." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCL9qQAmTioMs8TUMs2msxTUr8YFA8n-RHuU6whmiEPRZGobkpVIDQvUOT9sYRV6Kz2_hIH4iR7o3nPH7pyyisUkdjvztwRpVS8mh8RtwA6a1SVmQzYH4SJMSDrr9EfPvUQKGht_IiGhWreqXfoSFv3RwHI2eApe-TpMDYr94kZQ7cPVBaBHPhUe5NTisXtgkt4M47vWW5LF19JFSF1BfJxQcFPg4moNNiBwOV-CtSqs2RbLLJyspIjTVVw6HtV4Y87dfo0VHlFdGk')"></div>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant italic">
+                        "Geçen aya göre toplam tüketimde %4.2 artış gözlemlendi."
+                    </p>
+</div>
+</div>
+<div class="bg-surface border border-outline-variant rounded-xl p-6">
+<h4 class="font-title-md text-title-md mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" data-icon="history">history</span>
+                    Son Okumalar
+                </h4>
+<div class="space-y-3">
+<div class="flex justify-between p-3 bg-white rounded border border-outline-variant/50">
+<span class="font-body-md">Dükkan 1</span>
+<span class="mono text-sm text-outline">12 Ağustos 2023, 14:20</span>
+</div>
+<div class="flex justify-between p-3 bg-white rounded border border-outline-variant/50">
+<span class="font-body-md">Dükkan 2</span>
+<span class="mono text-sm text-outline">11 Ağustos 2023, 10:45</span>
+</div>
+<div class="flex justify-between p-3 bg-white rounded border border-outline-variant/50">
+<span class="font-body-md">Dükkan 3</span>
+<span class="mono text-sm text-outline">10 Ağustos 2023, 09:12</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Bottom Navigation Shell (As per JSON) -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full flex justify-around items-center py-2 bg-surface border-t border-outline-variant pb-safe z-50">
+<a class="flex flex-col items-center justify-center bg-secondary-container text-on-secondary-container rounded-full px-4 py-1 transition-transform duration-150 scale-100" href="#">
+<span class="material-symbols-outlined" data-icon="home" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-label-sm text-label-sm">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span class="font-label-sm text-label-sm">Meters</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+<span class="font-label-sm text-label-sm">History</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-label-sm text-label-sm">Settings</span>
+</a>
+</nav>
+<!-- Floating Action Button for Mobile -->
+<button class="md:hidden fixed bottom-24 right-6 w-14 h-14 bg-primary text-white rounded-full shadow-xl flex items-center justify-center z-40 active:scale-90 transition-transform">
+<span class="material-symbols-outlined text-3xl" data-icon="add" style="font-variation-settings: 'wght' 700;">add</span>
+</button>
+<script>
+        // Micro-interaction for shop cards
+        document.querySelectorAll('.group').forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                const bar = card.querySelector('.bg-primary');
+                if(bar) {
+                    bar.style.filter = 'brightness(1.3)';
+                }
+            });
+            card.addEventListener('mouseleave', () => {
+                const bar = card.querySelector('.bg-primary');
+                if(bar) {
+                    bar.style.filter = 'none';
+                }
+            });
+        });
+    </script>
+</body></html>
