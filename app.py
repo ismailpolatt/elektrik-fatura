@@ -437,57 +437,72 @@ def extract_from_text(text):
         result["mainMeterContext"] = kwh_context
 
     # -----------------------------------------------------------------------
-    # 3. Fatura Tutarı (TL) Odak: Üst Özet Kutusu
+    # 3. Fatura Tutarı (TL) Odak: Üst Özet Kutusu ve Net Tutar
     # -----------------------------------------------------------------------
     tl_found = None
     tl_context = None
 
     # Step 3.1: Üst özet kutusundaki "Fatura Tutarı ... 5800.00 TL"
+    # Matches "Fatura Tutarı" followed within reasonable distance by an amount with TL/TI/T/1L
     m_box_tl = re.search(
-        r"Fatura\s*Tutar[ıi][^\d\n\r]*\n?\s*([\d.,]+)\s*TL",
+        r"Fatura\s*Tutar[ıi][^0-9\n]{0,80}(?:\n[^0-9\n]{0,80})*?([\d.,]+)\s*(?:TL|TI|T|1L)\b",
         text_clean,
         re.IGNORECASE,
     )
     if m_box_tl:
         val = parse_money(m_box_tl.group(1))
-        if val and val > 10:
+        if val and 10 < val < 200000:
             tl_found = val
             tl_context = f"Fatura Tutarı Kutusu ({val} TL)"
 
-    # Step 3.2: Fatura Tutarı anahtar kelimesi (iki nokta veya alt satır)
+    # Step 3.2: Fatura Tutarı ve Güncel Yuvarlama (Kuruş Düzeltmesi)
+    # Türk faturalarında alt dökümde "Fatura Tutarı : 5800.51" ve hemen üstünde "Güncel Yuvarlama : -0.51" yer alır.
+    # Net ödenecek tutar = 5800.51 + (-0.51) = 5800.00 TL'dir.
     if tl_found is None:
-        for m in re.finditer(
-            r"Fatura\s*Tutar[ıi][^\d\n\r:]*[:]?\s*([\d.,]+)",
-            text_clean,
-            re.IGNORECASE,
-        ):
-            val = parse_money(m.group(1))
-            if val and val > 10:
+        for m in re.finditer(r"Fatura\s*Tutar[ıi]\s*[:]?\s*([\d.,]+)", text_clean, re.IGNORECASE):
+            raw_num = m.group(1)
+            val = parse_money(raw_num)
+            if val and 10 < val < 200000:
+                snippet_start = max(0, m.start() - 250)
+                snippet_end = min(len(text_clean), m.end() + 250)
+                snippet = text_clean[snippet_start:snippet_end]
+                m_yuv = re.search(r"(?:G[üu]ncel\s*)?Yuvarlama[^\d+-]*([+-]?\s*[\d.,]+)", snippet, re.IGNORECASE)
+                if m_yuv:
+                    yuv_raw = m_yuv.group(1)
+                    is_neg = "-" in yuv_raw
+                    yuv_val = parse_money(yuv_raw.replace("-", "").replace("+", ""))
+                    if yuv_val is not None:
+                        val = round(val - yuv_val if is_neg else val + yuv_val, 2)
                 tl_found = val
-                tl_context = f"Fatura Tutarı ({val} TL)"
+                tl_context = f"Fatura Tutarı Net ({val} TL)"
                 break
 
     # Step 3.3: Ödenecek Tutar / Toplam Tutar
     if tl_found is None:
-        for kw in ["ödenecek tutar", "odenecek tutar", "toplam tutar", "fatura bedeli"]:
-            m = re.search(rf"{kw}[^\d\n\r:]*[:]?\s*([\d.,]+)", text_clean, re.IGNORECASE)
+        for kw in ["ödenecek tutar", "odenecek tutar", "fatura bedeli", "toplam tutar"]:
+            m = re.search(rf"{kw}\s*[:]?\s*([\d.,]+)", text_clean, re.IGNORECASE)
             if m:
                 val = parse_money(m.group(1))
-                if val and val > 10:
+                if val and 10 < val < 200000:
                     tl_found = val
                     tl_context = f"{kw.title()} ({val} TL)"
                     break
 
-    # Step 3.4: Genel TL regex (KDV matrahı, BTV, fon ve enerji bedelleri filtrelenir)
+    # Step 3.4: Genel TL regex (KDV matrahı, BTV, fon, çarpan, demand ve sayaç verileri filtrelenir)
     if tl_found is None:
         candidates = []
-        for m in re.finditer(r"([\d.,]+)\s*[Tt][Ll]", text_clean):
+        for m in re.finditer(r"([\d.,]+)\s*(?:TL|TI)\b", text_clean, re.IGNORECASE):
             ctx_start = max(0, m.start() - 60)
-            ctx = text_clean[ctx_start:m.end()].lower()
-            if any(bad in ctx for bad in ["kdv", "matrah", "fon", "enerji bedeli", "btv", "kesme"]):
+            ctx_end = min(len(text_clean), m.end() + 20)
+            ctx = text_clean[ctx_start:ctx_end].lower()
+            if any(bad in ctx for bad in [
+                "kdv", "matrah", "fon", "enerji bedeli", "btv", "kesme",
+                "çarpan", "carpan", "demand", "güç", "guc", "seri", "sayaç", "sayac",
+                "tesisat", "sözleşme", "dönem toplam"
+            ]):
                 continue
             val = parse_money(m.group(1))
-            if val and val > 10:
+            if val and 10 < val < 200000:
                 candidates.append((val, ctx.strip()))
         if candidates:
             best = max(candidates, key=lambda x: x[0])
@@ -547,9 +562,11 @@ def find_blue_marker_region(img):
     top_y = min(c[0][0] for c in clusters)
     bottom_y = max(c[-1][0] for c in clusters)
 
-    # 20px padding around markers
+    # Top: 20px padding
+    # Bottom: 55px padding to fully include Fatura Tutarı (5800.51) and Güncel Yuvarlama
+    # while stopping before Çarpan/Demand/Dönem Toplam
     top = max(0, top_y - 20)
-    bottom = min(h, bottom_y + 20)
+    bottom = min(h, bottom_y + 55)
     return (0, top, w, bottom)
 
 
@@ -573,6 +590,11 @@ def ocr_image(image_bytes):
     marker_box = find_blue_marker_region(img)
     if marker_box:
         img = img.crop(marker_box)
+
+    # Upscale narrow/low-DPI mobile screenshots so Tesseract reads small fonts cleanly
+    if img.width < 1000:
+        scale = max(2, int(1200 / img.width))
+        img = img.resize((img.width * scale, img.height * scale), Image.Resampling.LANCZOS)
 
     try:
         text = pytesseract.image_to_string(img, lang="tur")
