@@ -4,3 +4,5 @@ data/
 *.db
 .env
 *.bak
+.venv/
+

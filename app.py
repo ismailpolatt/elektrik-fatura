@@ -42,9 +42,15 @@ def init_db():
             emlak_amount REAL NOT NULL,
             unit_price REAL NOT NULL,
             warnings TEXT DEFAULT '',
+            reading_date TEXT,
             created_at TEXT NOT NULL
         )
     """)
+    # Check if reading_date column exists for backwards compatibility
+    cursor = conn.execute("PRAGMA table_info(calculations)")
+    cols = [row[1] for row in cursor.fetchall()]
+    if "reading_date" not in cols:
+        conn.execute("ALTER TABLE calculations ADD COLUMN reading_date TEXT")
     conn.commit()
     conn.close()
 
@@ -52,31 +58,50 @@ def init_db():
 # Calculation
 # ---------------------------------------------------------------------------
 
+def safe_float(val, default=None):
+    """Safely convert any value to float, handling Turkish/English number strings."""
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        parsed = parse_number_flex(val)
+        return parsed if parsed is not None else default
+    return default
+
+
 def calculate(data):
-    total_bill = data["totalBill"]
-    main_meter = data["mainMeter"]
-    lokanta_start = data["lokantaStart"]
-    lokanta_end = data["lokantaEnd"]
-    koltukcu_start = data["koltukcuStart"]
-    koltukcu_end = data["koltukcuEnd"]
+    if not isinstance(data, dict):
+        return {"errors": ["Geçersiz veri formatı."]}
+
+    total_bill = safe_float(data.get("totalBill"))
+    main_meter = safe_float(data.get("mainMeter"))
+    lokanta_start = safe_float(data.get("lokantaStart"), 0.0)
+    lokanta_end = safe_float(data.get("lokantaEnd"), 0.0)
+    koltukcu_start = safe_float(data.get("koltukcuStart"), 0.0)
+    koltukcu_end = safe_float(data.get("koltukcuEnd"), 0.0)
+    reading_date = str(data.get("readingDate") or "").strip()
 
     errors = []
     warnings = []
 
-    if total_bill <= 0:
-        errors.append("Fatura tutarı sıfırdan büyük olmalıdır.")
-    if main_meter <= 0:
-        errors.append("Ana sayaç tüketimi sıfırdan büyük olmalıdır.")
+    if total_bill is None or total_bill <= 0:
+        errors.append("Fatura tutarı sıfırdan büyük geçerli bir sayı olmalıdır.")
+    if main_meter is None or main_meter <= 0:
+        errors.append("Ana sayaç tüketimi sıfırdan büyük geçerli bir sayı olmalıdır.")
 
-    lokanta_consumption = lokanta_end - lokanta_start
-    koltukcu_consumption = koltukcu_end - koltukcu_start
-    sub_total = lokanta_consumption + koltukcu_consumption
-    emlak_consumption = main_meter - sub_total
+    if errors:
+        return {"errors": errors}
+
+    lokanta_consumption = round(lokanta_end - lokanta_start, 2)
+    koltukcu_consumption = round(koltukcu_end - koltukcu_start, 2)
+    sub_total = round(lokanta_consumption + koltukcu_consumption, 2)
+    emlak_consumption = round(main_meter - sub_total, 2)
 
     if lokanta_consumption < 0:
-        warnings.append("Lokanta alt sayacında başlangıç değeri bitiş değerinden büyük. Lütfen kontrol ediniz.")
+        warnings.append("Lokanta alt sayacında başlangıç değeri bitiş değerinden büyük. Lütfen okumaları kontrol ediniz.")
     if koltukcu_consumption < 0:
-        warnings.append("Koltukçu alt sayacında başlangıç değeri bitiş değerinden büyük. Lütfen kontrol ediniz.")
+        warnings.append("Koltukçu alt sayacında başlangıç değeri bitiş değerinden büyük. Lütfen okumaları kontrol ediniz.")
     if sub_total > main_meter:
         warnings.append(
             f"Alt sayaç toplamı ({sub_total:.1f} kWh) ana sayaç tüketimini "
@@ -84,45 +109,52 @@ def calculate(data):
             f"Okumaları kontrol ediniz."
         )
 
-    if errors:
-        return {"errors": errors}
+    unit_price = round(total_bill / main_meter, 6)
 
-    unit_price = total_bill / main_meter
+    # Calculate amounts
+    lokanta_amount = round((lokanta_consumption / main_meter) * total_bill, 2)
+    koltukcu_amount = round((koltukcu_consumption / main_meter) * total_bill, 2)
 
-    lokanta_amount = (lokanta_consumption / main_meter) * total_bill
-    koltukcu_amount = (koltukcu_consumption / main_meter) * total_bill
-    emlak_amount = (emlak_consumption / main_meter) * total_bill
+    # Kuruş dengesi: Emlak Ofisi arta kalan birim olduğundan,
+    # 3 işletmenin toplamının ana faturaya kuruşu kuruşuna tam eşit olması sağlanır.
+    emlak_amount = round(total_bill - lokanta_amount - koltukcu_amount, 2)
+
+    # Calculate percentages
+    lokanta_pct = round((lokanta_consumption / main_meter) * 100, 1)
+    koltukcu_pct = round((koltukcu_consumption / main_meter) * 100, 1)
+    emlak_pct = round((emlak_consumption / main_meter) * 100, 1)
 
     return {
         "totalBill": total_bill,
         "mainMeter": main_meter,
+        "readingDate": reading_date,
         "unitPrice": unit_price,
         "shops": [
             {
                 "id": "lokanta",
                 "name": "Lokanta",
                 "icon": "\U0001F37D️",
-                "consumption": round(lokanta_consumption, 2),
-                "percentage": round((lokanta_consumption / main_meter) * 100, 1),
-                "amount": round(lokanta_amount, 2),
+                "consumption": lokanta_consumption,
+                "percentage": lokanta_pct,
+                "amount": lokanta_amount,
                 "color": "#f59e0b",
             },
             {
                 "id": "koltukcu",
                 "name": "Koltukçu",
                 "icon": "\U0001F4BA",
-                "consumption": round(koltukcu_consumption, 2),
-                "percentage": round((koltukcu_consumption / main_meter) * 100, 1),
-                "amount": round(koltukcu_amount, 2),
+                "consumption": koltukcu_consumption,
+                "percentage": koltukcu_pct,
+                "amount": koltukcu_amount,
                 "color": "#3b82f6",
             },
             {
                 "id": "emlak",
                 "name": "Emlak Ofisi",
                 "icon": "\U0001F3EA",
-                "consumption": round(emlak_consumption, 2),
-                "percentage": round((emlak_consumption / main_meter) * 100, 1),
-                "amount": round(emlak_amount, 2),
+                "consumption": emlak_consumption,
+                "percentage": emlak_pct,
+                "amount": emlak_amount,
                 "color": "#10b981",
             },
         ],
@@ -134,202 +166,399 @@ def calculate(data):
 # ---------------------------------------------------------------------------
 
 def parse_number_flex(s):
-    """Parse a number string that may use either English or Turkish format.
+    """Parse a number string supporting both Turkish (1.500,75 or 150,5) and English (1,500.75 or 150.5) formats.
 
-    English: 4,325.00  (comma=thousands, dot=decimal)
-    Turkish: 1.500,75  (dot=thousands, comma=decimal)
-
-    Heuristic: the LAST separator (comma or dot) in the string is the
-    decimal mark if there are exactly 2 digits after it; otherwise it
-    is a thousands separator and the number has no fractional part.
+    Correctly distinguishes between decimal and thousands separators without stripping
+    valid decimal digits.
     """
-    s = s.strip()
+    if s is None:
+        return None
+    s = str(s).strip()
+    # Remove currency symbols and extraneous characters, keep only digits, comma, dot
+    s = re.sub(r"[^\d.,]", "", s)
     if not s:
         return None
 
-    comma_idx = s.rfind(",")
-    dot_idx = s.rfind(".")
+    comma_count = s.count(",")
+    dot_count = s.count(".")
 
-    if comma_idx == -1 and dot_idx == -1:
-        # No separators at all — plain integer
+    # Case 1: Both comma and dot present
+    if comma_count > 0 and dot_count > 0:
+        last_comma = s.rfind(",")
+        last_dot = s.rfind(".")
+        if last_comma > last_dot:
+            # Turkish: 1.500,75 or 1.500.000,50
+            clean = s.replace(".", "").replace(",", ".")
+        else:
+            # English: 1,500.75 or 1,500,000.50
+            clean = s.replace(",", "")
         try:
-            return float(s)
+            return float(clean)
         except ValueError:
             return None
 
-    # Determine which separator is the decimal mark
-    last_sep_idx = max(comma_idx, dot_idx)
-    last_sep_char = s[last_sep_idx]
-    digits_after = len(s) - last_sep_idx - 1
-
-    if digits_after == 2:
-        # The last separator is the decimal mark
-        decimal_char = last_sep_char
-        thousands_char = "." if decimal_char == "," else ","
-        clean = s.replace(thousands_char, "").replace(decimal_char, ".")
-    elif digits_after == 3 and comma_idx >= 0 and dot_idx >= 0:
-        # Both present, last separator has 3 digits after
-        # Treat the other one as decimal if it has 2 digits after
-        first_sep_idx = min(comma_idx, dot_idx)
-        first_digits_after = last_sep_idx - first_sep_idx - 1
-        if first_digits_after == 2:
-            decimal_char = s[first_sep_idx]
-            thousands_char = s[last_sep_idx]
-            clean = s.replace(thousands_char, "").replace(decimal_char, ".")
+    # Case 2: Only comma present
+    if comma_count > 0:
+        if comma_count > 1:
+            # Multiple commas, e.g. 1,500,000 -> thousands
+            clean = s.replace(",", "")
         else:
-            clean = s.replace(",", "").replace(".", "")
-    else:
-        # Only one separator, or can't determine — treat all as thousands
-        clean = s.replace(",", "").replace(".", "")
+            # Single comma in Turkish is always decimal mark: 150,5 -> 150.5, 1500,75 -> 1500.75
+            clean = s.replace(",", ".")
+        try:
+            return float(clean)
+        except ValueError:
+            return None
 
+    # Case 3: Only dot present
+    if dot_count > 0:
+        if dot_count > 1:
+            # Multiple dots: 1.500.000 -> thousands
+            clean = s.replace(".", "")
+        else:
+            # Single dot: e.g. 150.5, 2450.80, 1.500
+            digits_after = len(s) - s.find(".") - 1
+            if digits_after in (1, 2) or s.startswith("0."):
+                clean = s
+            elif digits_after == 3 and len(s[:s.find(".")]) <= 3:
+                # e.g. 1.500 or 2.450 in Turkish invoice context -> 1500, 2450
+                clean = s.replace(".", "")
+            else:
+                clean = s
+        try:
+            return float(clean)
+        except ValueError:
+            return None
+
+    # Case 4: Plain integer
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_kwh(s):
+    """Parse electricity consumption (kWh).
+    
+    In electricity meters and bills, readings are recorded down to thousandths of a kWh
+    (e.g. 870.000, 8.350, 878.350). Therefore, a single dot is always a decimal point.
+    """
+    if s is None:
+        return None
+    s = str(s).strip()
+    s = re.sub(r"[^\d.,]", "", s)
+    if not s:
+        return None
+    comma_count = s.count(",")
+    dot_count = s.count(".")
+    if comma_count > 0 and dot_count > 0:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif comma_count > 0:
+        if comma_count > 1:
+            s = s.replace(",", "")
+        else:
+            s = s.replace(",", ".")
+    elif dot_count > 1:
+        s = s.replace(".", "")
+    # Single dot: in kWh context, 870.000 is 870.0 kWh, 8.350 is 8.35 kWh
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_money(s):
+    """Parse monetary amounts (TL), handling Turkish and English decimal conventions."""
+    if s is None:
+        return None
+    s = str(s).strip()
+    s = re.sub(r"[^\d.,]", "", s)
+    if not s:
+        return None
+    comma_count = s.count(",")
+    dot_count = s.count(".")
+    if comma_count > 0 and dot_count > 0:
+        if s.rfind(",") > s.rfind("."):
+            clean = s.replace(".", "").replace(",", ".")
+        else:
+            clean = s.replace(",", "")
+    elif comma_count > 0:
+        if comma_count > 1:
+            clean = s.replace(",", "")
+        else:
+            clean = s.replace(",", ".")
+    elif dot_count > 0:
+        if dot_count > 1:
+            clean = s.replace(".", "")
+        else:
+            clean = s
+    else:
+        clean = s
     try:
         return float(clean)
     except ValueError:
         return None
 
 
+def normalize_date(d_str):
+    """Normalize date strings (DD-MM-YYYY, DD.MM.YYYY, DD/MM/YYYY) to YYYY-MM-DD."""
+    if not d_str:
+        return None
+    d_str = d_str.strip().replace("/", "-").replace(".", "-")
+    parts = d_str.split("-")
+    if len(parts) == 3:
+        if len(parts[0]) == 4:  # YYYY-MM-DD
+            return f"{parts[0]}-{parts[1].zfill(2)}-{parts[2].zfill(2)}"
+        elif len(parts[2]) == 4:  # DD-MM-YYYY
+            return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+    return None
+
+
 def extract_from_text(text):
-    """Extract total bill (TL) and consumption (kWh) from OCR text."""
+    """Extract total bill (TL), consumption (kWh), and reading date from bill text.
+    
+    Specifically tuned for Turkish electricity bills (CK Boğaziçi, BEDAŞ, Enerjisa, etc.):
+    - Focuses on the core section between Fatura Tutarı and Fatura Detayı / Okuma Bilgisi.
+    - Sums multi-tier (kademeli) Enerji Bedeli consumption rows (e.g. 870.000 + 8.350 = 878.350 kWh).
+    - Authoritative Tek Zamanlı Fark in Okuma Bilgisi.
+    - Strictly filters out annual totals ('Dönem Toplam'), previous bills ('Önceki fatura'),
+      and tax bases.
+    """
     if not text:
         return None
 
-    # Normalize encoding artifacts
-    text = text.replace("|", "I")
-    text_lower = text.lower()
-
-    kwh_candidates = []
-    tl_candidates = []
-
-    # ---- kWh detection ----
-    for m in re.finditer(r"([\d.,]+)\s*k[wW][hH]", text):
-        val = parse_number_flex(m.group(1))
-        # Filter implausible values: must be between 5 and 50000 kWh
-        if val is not None and 5 < val < 50000:
-            start = max(0, m.start() - 60)
-            ctx = text[start:m.end()].lower()
-            # Exclude "önceki" references
-            is_prev = any(kw in ctx for kw in ["önceki", "nceki", "nceki fatura"])
-            kwh_candidates.append({
-                "value": val,
-                "context": ctx.strip(),
-                "is_total": any(kw in ctx for kw in
-                    ["toplam", "tüketim", "tuketim", "endeks", "sayaç", "sayac"]),
-                "is_prev": is_prev,
-            })
-
-    # ---- kWh: "Enerji Bedeli" nearby (BEDAŞ format) ----
-    # The first number after "Enerji Bedeli" is consumption (kWh),
-    # the second is the unit rate — only take the first.
-    for kw in ["enerji bedeli"]:
-        idx = text_lower.find(kw)
-        if idx >= 0:
-            snippet = text[idx:idx + 100]
-            numbers = list(re.finditer(r"([\d.,]+)", snippet))
-            if numbers:
-                val = parse_number_flex(numbers[0].group(1))
-                if val is not None and 5 < val < 50000:
-                    kwh_candidates.append({
-                        "value": val,
-                        "context": kw.title(),
-                        "is_total": True,
-                        "is_prev": False,
-                    })
-
-    # ---- TL detection: number + "TL" ----
-    for m in re.finditer(r"([\d.,]+)\s*[Tt][Ll]", text):
-        val = parse_number_flex(m.group(1))
-        if val is not None and val > 0:
-            start = max(0, m.start() - 60)
-            ctx = text[start:m.end()].lower()
-            tl_candidates.append({
-                "value": val,
-                "context": ctx.strip(),
-                "is_total": any(kw in ctx for kw in
-                    ["toplam", "ödenecek", "odenecek", "fatura", "tutar",
-                     "borç", "borc", "tahakkuk", "öde", "ode"]),
-            })
-
-    # ---- TL detection: "Fatura Tutarı" / "Toplam" keyword nearby ----
-    for kw in ["fatura tutar", "toplam tutar", "fatura bedeli", "ödenecek tutar",
-               "toplam borç", "fatura toplam"]:
-        idx = text_lower.find(kw)
-        if idx >= 0:
-            # Scan the 200 chars after keyword for a number
-            snippet = text[idx:idx + 200]
-            for m in re.finditer(r"([\d.,]+)", snippet):
-                val = parse_number_flex(m.group(1))
-                if val is not None and val > 10:  # must be > 10 TL to be a bill
-                    tl_candidates.append({
-                        "value": val,
-                        "context": kw.title(),
-                        "is_total": True,
-                    })
-                    break  # one per keyword
-
-    # ---- kWh: "Toplam" / "Tüketim" keyword nearby (on its own line) ----
-    for kw in ["toplam(kwh)", "toplam tüketim", "dönem\ntoplam"]:
-        idx = text_lower.find(kw)
-        if idx >= 0:
-            snippet = text[idx:idx + 300]
-            # Find numbers, take the largest plausible one
-            best = None
-            for m in re.finditer(r"([\d.,]+)", snippet):
-                val = parse_number_flex(m.group(1))
-                if val is not None and 5 < val < 50000:
-                    if best is None or val > best["value"]:
-                        best = {"value": val, "context": kw.title(), "is_total": True, "is_prev": False}
-            if best:
-                kwh_candidates.append(best)
-
-    # ---- kWh: also scan for bare "kW" (without h) ----
-    for m in re.finditer(r"([\d.,]+)\s*k[wW]\b", text):
-        val = parse_number_flex(m.group(1))
-        if val is not None and 5 < val < 50000:
-            start = max(0, m.start() - 60)
-            ctx = text[start:m.end()].lower().strip()
-            is_prev = any(kw in ctx for kw in ["önceki", "nceki"])
-            kwh_candidates.append({
-                "value": val,
-                "context": ctx,
-                "is_total": False,
-                "is_prev": is_prev,
-            })
+    # Normalize encoding / OCR artifacts
+    text_clean = text.replace("|", "I")
+    lines = [line.strip() for line in text_clean.splitlines() if line.strip()]
 
     result = {}
 
-    # ---- Pick best kWh ----
-    if kwh_candidates:
-        # Exclude previous-bill references first
-        current = [c for c in kwh_candidates if not c.get("is_prev")]
-        pool = current if current else kwh_candidates
+    # -----------------------------------------------------------------------
+    # 1. Okuma Tarihi (Reading Date)
+    # -----------------------------------------------------------------------
+    # E.g.: "Okuma Günü 29-07-2026 27-08-2026" (2nd date is Son Okuma)
+    m_okuma = re.search(
+        r"Okuma\s*G[üu]n[üu][^\d]*(\d{2}[-./]\d{2}[-./]\d{4})\s+(\d{2}[-./]\d{2}[-./]\d{4})",
+        text_clean,
+        re.IGNORECASE,
+    )
+    if m_okuma:
+        result["readingDate"] = normalize_date(m_okuma.group(2))
+    else:
+        m_son_okuma = re.search(
+            r"(?:Son\s*Okuma(?:\s*Tarihi)?|Fatura\s*Tarihi)[^\d]*(\d{2}[-./]\d{2}[-./]\d{4})",
+            text_clean,
+            re.IGNORECASE,
+        )
+        if m_son_okuma:
+            result["readingDate"] = normalize_date(m_son_okuma.group(1))
 
-        # Prefer "enerji bedeli" source (always current period consumption)
-        from_energy = [c for c in pool if "enerji bedeli" in c.get("context", "").lower()]
-        if from_energy:
-            best_kwh = max(from_energy, key=lambda c: c["value"])
-        else:
-            totals = [c for c in pool if c["is_total"]]
-            source = totals if totals else pool
-            best_kwh = max(source, key=lambda c: c["value"])
+    # -----------------------------------------------------------------------
+    # 2. Tüketim (kWh) Odak: Okuma Bilgisi & Fatura Detayı
+    # -----------------------------------------------------------------------
+    kwh_found = None
+    kwh_context = None
 
-        result["mainMeter"] = best_kwh["value"]
-        result["mainMeterContext"] = best_kwh["context"][:100]
+    # Step 2.1: Tek Zamanlı Fark in Okuma Bilgisi
+    # E.g.: "Tek Zamanlı 4201.919 5080.269 878.350"
+    m_tek = re.search(
+        r"Tek\s*Zamanl[ıi]\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)",
+        text_clean,
+        re.IGNORECASE,
+    )
+    if m_tek:
+        fark = parse_kwh(m_tek.group(3))
+        if fark and 5 < fark < 50000:
+            kwh_found = fark
+            kwh_context = f"Okuma Bilgisi Tek Zamanlı Fark ({fark} kWh)"
 
-    # ---- Pick best TL ----
-    if tl_candidates:
-        totals = [c for c in tl_candidates if c["is_total"]]
-        source = totals if totals else tl_candidates
-        best_tl = max(source, key=lambda c: c["value"])
-        result["totalBill"] = best_tl["value"]
-        result["totalBillContext"] = best_tl["context"][:100]
+    # Step 2.2: Kademeli / Çoklu "Enerji Bedeli" Satırlarının Toplamı
+    # E.g.: "Enerji Bedeli-Düşük Kade 870.000 5.352457 4656.64"
+    #       "Enerji Bedeli-Yüksek Kade 8.350 5.934455 49.55"
+    # (Exclude "T. Enerji Bedeli" or "Toplam Enerji Bedeli" which are monetary amounts)
+    enerji_lines_kwh = []
+    for line in lines:
+        line_lower = line.lower()
+        if "enerji bedeli" in line_lower and not re.match(r"^(?:t\.|toplam)\s*enerji\s*bedeli", line_lower):
+            rest = line[line_lower.find("enerji bedeli") + len("enerji bedeli"):]
+            m_num = re.search(r"([\d.,]+)", rest)
+            if m_num:
+                v = parse_kwh(m_num.group(1))
+                if v and 0.5 <= v < 50000:
+                    enerji_lines_kwh.append(v)
+
+    if enerji_lines_kwh:
+        total_enerji_kwh = round(sum(enerji_lines_kwh), 3)
+        if kwh_found is None:
+            kwh_found = total_enerji_kwh
+            kwh_context = f"Fatura Detayı Enerji Bedeli Toplamı ({total_enerji_kwh} kWh)"
+        elif abs(kwh_found - total_enerji_kwh) < 0.1:
+            kwh_found = total_enerji_kwh
+            kwh_context = f"Fatura Detayı ve Okuma Bilgisi Doğrulandı ({total_enerji_kwh} kWh)"
+
+    # Step 2.3: Üç Zamanlı (Gündüz + Puant + Gece Farkları)
+    if kwh_found is None:
+        rates = []
+        for kw in ["Gündüz", "Puant", "Gece"]:
+            m_rate = re.search(
+                rf"{kw}[^\n\r\d]*[\d.,]+\s+[\d.,]+\s+([\d.,]+)",
+                text_clean,
+                re.IGNORECASE,
+            )
+            if m_rate:
+                v = parse_kwh(m_rate.group(1))
+                if v:
+                    rates.append(v)
+        if len(rates) == 3:
+            kwh_found = round(sum(rates), 3)
+            kwh_context = f"Okuma Bilgisi 3-Zamanlı Toplam ({kwh_found} kWh)"
+
+    # Step 2.4: Fallback genel arama (Dönem Toplam, Önceki Fatura ve Ortalama Tüketim hariç)
+    if kwh_found is None:
+        for m in re.finditer(r"([\d.,]+)\s*k[wW][hH]", text_clean):
+            ctx_start = max(0, m.start() - 70)
+            ctx = text_clean[ctx_start:m.end()].lower()
+            if any(bad in ctx for bad in [
+                "önceki", "nceki", "dönem toplam", "donem toplam",
+                "yıllık", "yillik", "geçen", "ortalama", "günlük", "gunluk"
+            ]):
+                continue
+            v = parse_kwh(m.group(1))
+            if v and 5 < v < 50000:
+                kwh_found = v
+                kwh_context = ctx.strip()
+                break
+
+    if kwh_found is not None:
+        result["mainMeter"] = kwh_found
+        result["mainMeterContext"] = kwh_context
+
+    # -----------------------------------------------------------------------
+    # 3. Fatura Tutarı (TL) Odak: Üst Özet Kutusu
+    # -----------------------------------------------------------------------
+    tl_found = None
+    tl_context = None
+
+    # Step 3.1: Üst özet kutusundaki "Fatura Tutarı ... 5800.00 TL"
+    m_box_tl = re.search(
+        r"Fatura\s*Tutar[ıi][^\d\n\r]*\n?\s*([\d.,]+)\s*TL",
+        text_clean,
+        re.IGNORECASE,
+    )
+    if m_box_tl:
+        val = parse_money(m_box_tl.group(1))
+        if val and val > 10:
+            tl_found = val
+            tl_context = f"Fatura Tutarı Kutusu ({val} TL)"
+
+    # Step 3.2: Fatura Tutarı anahtar kelimesi (iki nokta veya alt satır)
+    if tl_found is None:
+        for m in re.finditer(
+            r"Fatura\s*Tutar[ıi][^\d\n\r:]*[:]?\s*([\d.,]+)",
+            text_clean,
+            re.IGNORECASE,
+        ):
+            val = parse_money(m.group(1))
+            if val and val > 10:
+                tl_found = val
+                tl_context = f"Fatura Tutarı ({val} TL)"
+                break
+
+    # Step 3.3: Ödenecek Tutar / Toplam Tutar
+    if tl_found is None:
+        for kw in ["ödenecek tutar", "odenecek tutar", "toplam tutar", "fatura bedeli"]:
+            m = re.search(rf"{kw}[^\d\n\r:]*[:]?\s*([\d.,]+)", text_clean, re.IGNORECASE)
+            if m:
+                val = parse_money(m.group(1))
+                if val and val > 10:
+                    tl_found = val
+                    tl_context = f"{kw.title()} ({val} TL)"
+                    break
+
+    # Step 3.4: Genel TL regex (KDV matrahı, BTV, fon ve enerji bedelleri filtrelenir)
+    if tl_found is None:
+        candidates = []
+        for m in re.finditer(r"([\d.,]+)\s*[Tt][Ll]", text_clean):
+            ctx_start = max(0, m.start() - 60)
+            ctx = text_clean[ctx_start:m.end()].lower()
+            if any(bad in ctx for bad in ["kdv", "matrah", "fon", "enerji bedeli", "btv", "kesme"]):
+                continue
+            val = parse_money(m.group(1))
+            if val and val > 10:
+                candidates.append((val, ctx.strip()))
+        if candidates:
+            best = max(candidates, key=lambda x: x[0])
+            tl_found = best[0]
+            tl_context = best[1]
+
+    if tl_found is not None:
+        result["totalBill"] = tl_found
+        result["totalBillContext"] = tl_context
 
     if "mainMeter" in result or "totalBill" in result:
         return result
     return None
 
 
+def find_blue_marker_region(img):
+    """Detect hand-drawn blue marker annotations on an invoice image.
+    
+    When a user circles or underlines target areas with a blue/azure marker,
+    this function isolates the vertical bounding box spanning from the first
+    marker cluster (e.g. Fatura Tutarı) to the last (e.g. Fatura Detayı).
+    Returns (left, top, right, bottom) crop box or None if no markers found.
+    """
+    w, h = img.size
+    row_counts = [0] * h
+
+    for y in range(h):
+        for x in range(0, w, 2):
+            r, g, b = img.getpixel((x, y))
+            # Android/iOS blue pen marker stroke:
+            # Saturated blue, significantly higher than red and green
+            # (distinct from invoice cyan header banners where G ~ B)
+            if b > 160 and (b - r) > 75 and (b - g) > 25:
+                row_counts[y] += 2
+
+    # Group into vertical clusters
+    clusters = []
+    current = []
+    for y in range(h):
+        if row_counts[y] >= 6:
+            current.append((y, row_counts[y]))
+        else:
+            if current:
+                if len(current) >= 10:
+                    total_px = sum(c for _, c in current)
+                    if total_px >= 120:
+                        clusters.append(current)
+                current = []
+    if current and len(current) >= 10:
+        total_px = sum(c for _, c in current)
+        if total_px >= 120:
+            clusters.append(current)
+
+    if not clusters:
+        return None
+
+    top_y = min(c[0][0] for c in clusters)
+    bottom_y = max(c[-1][0] for c in clusters)
+
+    # 20px padding around markers
+    top = max(0, top_y - 20)
+    bottom = min(h, bottom_y + 20)
+    return (0, top, w, bottom)
+
+
 def ocr_image(image_bytes):
-    """Run Tesseract OCR on an image, return extracted text."""
+    """Run Tesseract OCR on an image, return extracted text.
+    
+    If hand-drawn blue markers are present, crops between them to focus OCR
+    precisely on the user-highlighted region (Fatura Tutarı + Detaylar).
+    """
     try:
         from PIL import Image
         import pytesseract
@@ -337,9 +566,13 @@ def ocr_image(image_bytes):
         return None
 
     img = Image.open(io.BytesIO(image_bytes))
-    # Convert to RGB if needed (e.g. PNG with alpha)
     if img.mode in ("RGBA", "P", "LA"):
         img = img.convert("RGB")
+
+    # Focus between blue markers if detected
+    marker_box = find_blue_marker_region(img)
+    if marker_box:
+        img = img.crop(marker_box)
 
     try:
         text = pytesseract.image_to_string(img, lang="tur")
@@ -454,19 +687,37 @@ def upload_and_ocr():
     return jsonify(result)
 
 
+@app.route("/api/calculate", methods=["POST"])
+def calculate_preview():
+    data = request.get_json()
+    if not data:
+        return jsonify({"errors": ["Geçersiz istek. JSON gövdesi bekleniyor."]}), 400
+
+    result = calculate(data)
+    if "errors" in result:
+        return jsonify(result), 400
+
+    return jsonify(result), 200
+
+
 @app.route("/api/last-readings", methods=["GET"])
 def last_readings():
     """Return the most recent end readings to auto-fill start fields."""
     conn = get_db()
     row = conn.execute(
-        "SELECT lokanta_end, koltukcu_end, created_at FROM calculations ORDER BY created_at DESC LIMIT 1"
+        """
+        SELECT lokanta_end, koltukcu_end, 
+               COALESCE(NULLIF(reading_date, ''), SUBSTR(created_at, 1, 10)) AS date 
+        FROM calculations 
+        ORDER BY id DESC LIMIT 1
+        """
     ).fetchone()
     conn.close()
     if row:
         return jsonify({
             "lokantaEnd": row["lokanta_end"],
             "koltukcuEnd": row["koltukcu_end"],
-            "date": row["created_at"],
+            "date": row["date"],
         })
     return jsonify({})
 
@@ -475,10 +726,33 @@ def last_readings():
 def list_calculations():
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM calculations ORDER BY created_at DESC"
+        """
+        SELECT *, 
+               COALESCE(NULLIF(reading_date, ''), SUBSTR(created_at, 1, 10)) AS effective_date 
+        FROM calculations 
+        ORDER BY id DESC
+        """
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/calculations/<int:calc_id>", methods=["GET"])
+def get_calculation(calc_id):
+    conn = get_db()
+    row = conn.execute(
+        """
+        SELECT *, 
+               COALESCE(NULLIF(reading_date, ''), SUBSTR(created_at, 1, 10)) AS effective_date 
+        FROM calculations 
+        WHERE id = ?
+        """,
+        (calc_id,)
+    ).fetchone()
+    conn.close()
+    if row:
+        return jsonify(dict(row))
+    return jsonify({"error": "Kayıt bulunamadı."}), 404
 
 
 @app.route("/api/calculations", methods=["POST"])
@@ -492,23 +766,24 @@ def create_calculation():
         return jsonify(result), 400
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    reading_date = str(data.get("readingDate") or now[:10]).strip()
     shops = {s["id"]: s for s in result["shops"]}
 
     conn = get_db()
-    conn.execute(
+    cursor = conn.execute(
         """
         INSERT INTO calculations
             (total_bill, main_meter,
              lokanta_start, lokanta_end, koltukcu_start, koltukcu_end,
              lokanta_consumption, koltukcu_consumption, emlak_consumption,
              lokanta_amount, koltukcu_amount, emlak_amount,
-             unit_price, warnings, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             unit_price, warnings, reading_date, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            data["totalBill"], data["mainMeter"],
-            data["lokantaStart"], data["lokantaEnd"],
-            data["koltukcuStart"], data["koltukcuEnd"],
+            result["totalBill"], result["mainMeter"],
+            safe_float(data.get("lokantaStart"), 0.0), safe_float(data.get("lokantaEnd"), 0.0),
+            safe_float(data.get("koltukcuStart"), 0.0), safe_float(data.get("koltukcuEnd"), 0.0),
             shops["lokanta"]["consumption"],
             shops["koltukcu"]["consumption"],
             shops["emlak"]["consumption"],
@@ -517,14 +792,16 @@ def create_calculation():
             shops["emlak"]["amount"],
             result["unitPrice"],
             "|".join(result["warnings"]),
+            reading_date,
             now,
         ),
     )
     conn.commit()
-    row_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    row_id = cursor.lastrowid
     conn.close()
 
     result["id"] = row_id
+    result["readingDate"] = reading_date
     result["createdAt"] = now
     return jsonify(result), 201
 
@@ -549,4 +826,7 @@ def index():
 
 if __name__ == "__main__":
     init_db()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    debug_mode = os.environ.get("FLASK_DEBUG", "0").lower() in ("1", "true")
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=debug_mode)
+

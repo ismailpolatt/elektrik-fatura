@@ -119,6 +119,36 @@
     input[type=number] {
       -moz-appearance: textfield;
     }
+    @media print {
+      header, nav, #mobile-fab, #toast, .no-print, #history-list, #history-count, button {
+        display: none !important;
+      }
+      body {
+        padding: 0 !important;
+        margin: 0 !important;
+        background: white !important;
+      }
+      main {
+        margin: 0 !important;
+        padding: 10px !important;
+        max-width: 100% !important;
+      }
+      #view-history, .view-section {
+        display: block !important;
+      }
+      #view-dashboard, #view-meters, #view-new-reading {
+        display: none !important;
+      }
+      #history-detail-panel {
+        width: 100% !important;
+        display: block !important;
+        position: static !important;
+      }
+      .print-card {
+        border: 1px solid #ccc !important;
+        box-shadow: none !important;
+      }
+    }
   </style>
 </head>
 <body class="text-on-surface bg-background min-h-screen flex flex-col pb-20 md:pb-0 md:pt-16">
@@ -832,12 +862,25 @@
 
         </div>
 
+        <!-- Quick Share Row inside drawer -->
+        <div class="flex items-center justify-between pt-2 pb-1 text-xs">
+          <span class="text-outline font-semibold">Sonuçları Paylaş:</span>
+          <div class="flex gap-2">
+            <button type="button" onclick="shareWhatsApp('current')" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-colors">
+              <span class="material-symbols-outlined text-sm">chat</span> WhatsApp
+            </button>
+            <button type="button" onclick="copyShareText('current')" class="border border-outline hover:bg-surface-container text-on-surface-variant px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-colors">
+              <span class="material-symbols-outlined text-sm">content_copy</span> Kopyala
+            </button>
+          </div>
+        </div>
+
         <!-- Action buttons inside drawer -->
-        <div class="flex gap-4 pt-4 border-t border-outline-variant/60">
+        <div class="flex gap-4 pt-3 border-t border-outline-variant/60">
           <button type="button" onclick="closeDrawer()" class="flex-1 border border-primary text-primary py-3.5 rounded-xl font-bold text-sm hover:bg-primary/5 transition-colors">
             Düzenle
           </button>
-          <button type="button" onclick="handleSave()" class="flex-1 bg-primary text-white py-3.5 rounded-xl font-bold text-sm hover:opacity-90 active:scale-95 transition-all shadow-md shadow-primary/20 flex items-center justify-center gap-1.5">
+          <button type="button" id="btn-drawer-save" onclick="handleSave()" class="flex-1 bg-primary text-white py-3.5 rounded-xl font-bold text-sm hover:opacity-90 active:scale-95 transition-all shadow-md shadow-primary/20 flex items-center justify-center gap-1.5">
             <span class="material-symbols-outlined text-base">save</span> Kaydet
           </button>
         </div>
@@ -859,10 +902,58 @@
     // ============================================
 
     function parseTurkishNumber(input) {
-      if (!input || input.trim() === '') return NaN;
-      let s = input.trim();
-      s = s.replace(/\./g, '');
-      s = s.replace(',', '.');
+      if (input === null || input === undefined) return NaN;
+      let s = String(input).trim();
+      if (!s) return NaN;
+
+      // Remove any characters other than digits, comma, dot
+      s = s.replace(/[^\d.,]/g, '');
+      if (!s) return NaN;
+
+      const hasComma = s.includes(',');
+      const hasDot = s.includes('.');
+
+      if (hasComma && hasDot) {
+        // The one that appears last is the decimal mark
+        if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+          // Turkish: 1.500,75
+          s = s.replace(/\./g, '').replace(',', '.');
+        } else {
+          // English: 1,500.75
+          s = s.replace(/,/g, '');
+        }
+        return parseFloat(s);
+      }
+
+      if (hasComma) {
+        if ((s.match(/,/g) || []).length > 1) {
+          // Multiple commas: 1,500,000 -> thousands
+          s = s.replace(/,/g, '');
+        } else {
+          // Single comma in Turkish is always decimal: 150,5 -> 150.5
+          s = s.replace(',', '.');
+        }
+        return parseFloat(s);
+      }
+
+      if (hasDot) {
+        if ((s.match(/\./g) || []).length > 1) {
+          // Multiple dots: 1.500.000 -> thousands
+          s = s.replace(/\./g, '');
+        } else {
+          // Single dot: e.g. 150.5 or 2450.80 or 1.500
+          const parts = s.split('.');
+          const decimals = parts[1] || '';
+          if (decimals.length === 1 || decimals.length === 2 || parts[0] === '0') {
+            // Keep dot as decimal separator
+          } else if (decimals.length === 3 && parts[0].length <= 3) {
+            // Turkish thousands: 1.500 -> 1500
+            s = s.replace('.', '');
+          }
+        }
+        return parseFloat(s);
+      }
+
       return parseFloat(s);
     }
 
@@ -875,11 +966,11 @@
       }).format(amount);
     }
 
-    function formatNumber(n) {
-      if (isNaN(n) || n === null) return '--';
+    function formatNumber(n, decimals = 1) {
+      if (isNaN(n) || n === null || n === undefined) return '--';
       return new Intl.NumberFormat('tr-TR', {
-        minimumFractionDigits: 1,
-        maximumFractionDigits: 1,
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
       }).format(n);
     }
 
@@ -1008,16 +1099,19 @@
     let lastCalculatedResult = null;
     let lastCalculatedInputs = null;
 
+    let currentHistoryItems = [];
+
     function loadDashboardData() {
       fetch('/api/calculations')
         .then(r => r.json())
         .then(items => {
           if (items && items.length > 0) {
             const latest = items[0];
+            const periodDate = latest.effective_date || latest.reading_date || latest.created_at.substring(0, 10);
             
             // Hero
-            document.getElementById('dash-hero-total').innerHTML = `<span class="text-secondary-fixed text-2xl font-bold">₺</span>${formatNumber(latest.total_bill)}`;
-            document.getElementById('dash-hero-detail').textContent = `${latest.created_at.substring(0, 10)} Tarihli Dönem | Toplam Tüketim: ${formatNumber(latest.main_meter)} kWh`;
+            document.getElementById('dash-hero-total').innerHTML = `<span class="text-secondary-fixed text-2xl font-bold">₺</span>${formatNumber(latest.total_bill, 2)}`;
+            document.getElementById('dash-hero-detail').textContent = `${periodDate} Tarihli Dönem | Toplam Tüketim: ${formatNumber(latest.main_meter)} kWh`;
             
             // Shop Details
             // Shop 1 (Lokanta)
@@ -1025,7 +1119,7 @@
             const lPct = (lCons / latest.main_meter) * 100;
             document.getElementById('dash-card-l-cons').innerHTML = `${formatNumber(lCons)} <span class="text-xs font-normal">kWh</span>`;
             document.getElementById('dash-card-l-pct').textContent = `%${formatNumber(lPct)}`;
-            document.getElementById('dash-card-l-bar').style.width = `${Math.min(100, lPct)}%`;
+            document.getElementById('dash-card-l-bar').style.width = `${Math.max(0, Math.min(100, lPct))}%`;
             document.getElementById('dash-card-l-amount').textContent = formatTL(latest.lokanta_amount);
             
             // Shop 2 (Koltukcu)
@@ -1033,7 +1127,7 @@
             const kPct = (kCons / latest.main_meter) * 100;
             document.getElementById('dash-card-k-cons').innerHTML = `${formatNumber(kCons)} <span class="text-xs font-normal">kWh</span>`;
             document.getElementById('dash-card-k-pct').textContent = `%${formatNumber(kPct)}`;
-            document.getElementById('dash-card-k-bar').style.width = `${Math.min(100, kPct)}%`;
+            document.getElementById('dash-card-k-bar').style.width = `${Math.max(0, Math.min(100, kPct))}%`;
             document.getElementById('dash-card-k-amount').textContent = formatTL(latest.koltukcu_amount);
 
             // Shop 3 (Emlak)
@@ -1041,17 +1135,17 @@
             const ePct = (eCons / latest.main_meter) * 100;
             document.getElementById('dash-card-e-cons').innerHTML = `${formatNumber(eCons)} <span class="text-xs font-normal">kWh</span>`;
             document.getElementById('dash-card-e-pct').textContent = `%${formatNumber(ePct)}`;
-            document.getElementById('dash-card-e-bar').style.width = `${Math.min(100, ePct)}%`;
+            document.getElementById('dash-card-e-bar').style.width = `${Math.max(0, Math.min(100, ePct))}%`;
             document.getElementById('dash-card-e-amount').textContent = formatTL(latest.emlak_amount);
 
             // Chart Bars
-            document.getElementById('chart-bar-l').style.height = `${Math.min(100, lPct)}%`;
+            document.getElementById('chart-bar-l').style.height = `${Math.max(0, Math.min(100, lPct))}%`;
             document.getElementById('chart-val-l').textContent = `%${formatNumber(lPct)}`;
             
-            document.getElementById('chart-bar-k').style.height = `${Math.min(100, kPct)}%`;
+            document.getElementById('chart-bar-k').style.height = `${Math.max(0, Math.min(100, kPct))}%`;
             document.getElementById('chart-val-k').textContent = `%${formatNumber(kPct)}`;
             
-            document.getElementById('chart-bar-e').style.height = `${Math.min(100, ePct)}%`;
+            document.getElementById('chart-bar-e').style.height = `${Math.max(0, Math.min(100, ePct))}%`;
             document.getElementById('chart-val-e').textContent = `%${formatNumber(ePct)}`;
 
             // Log
@@ -1061,9 +1155,24 @@
             document.getElementById('dash-last-date').textContent = `Son güncelleme: ${latest.created_at}`;
           } else {
             // Default Empty States
-            document.getElementById('dash-hero-total').textContent = "₺0,00";
+            document.getElementById('dash-hero-total').innerHTML = `<span class="text-secondary-fixed text-2xl font-bold">₺</span>0,00`;
             document.getElementById('dash-hero-detail').textContent = "Sistemde kayıt bulunamadı.";
+            document.getElementById('dash-last-l').textContent = "-- kWh";
+            document.getElementById('dash-last-k').textContent = "-- kWh";
+            document.getElementById('dash-last-m').textContent = "-- kWh";
             document.getElementById('dash-last-date').textContent = "Son güncelleme: --";
+            document.getElementById('dash-card-l-cons').innerHTML = `-- <span class="text-xs font-normal">kWh</span>`;
+            document.getElementById('dash-card-l-pct').textContent = `%--`;
+            document.getElementById('dash-card-l-bar').style.width = `0%`;
+            document.getElementById('dash-card-l-amount').textContent = "₺0,00";
+            document.getElementById('dash-card-k-cons').innerHTML = `-- <span class="text-xs font-normal">kWh</span>`;
+            document.getElementById('dash-card-k-pct').textContent = `%--`;
+            document.getElementById('dash-card-k-bar').style.width = `0%`;
+            document.getElementById('dash-card-k-amount').textContent = "₺0,00";
+            document.getElementById('dash-card-e-cons').innerHTML = `-- <span class="text-xs font-normal">kWh</span>`;
+            document.getElementById('dash-card-e-pct').textContent = `%--`;
+            document.getElementById('dash-card-e-bar').style.width = `0%`;
+            document.getElementById('dash-card-e-amount').textContent = "₺0,00";
           }
         });
     }
@@ -1083,6 +1192,15 @@
             document.getElementById('spec-sub1-val').textContent = `${formatNumber(latest.lokanta_end)} kWh`;
             document.getElementById('spec-sub2-val').textContent = `${formatNumber(latest.koltukcu_end)} kWh`;
             document.getElementById('spec-net-val').textContent = `${formatNumber(latest.emlak_consumption)} kWh`;
+          } else {
+            document.getElementById('schema-main').innerHTML = `-- <span class="text-sm font-normal">kWh</span>`;
+            document.getElementById('schema-sub1').textContent = `-- kWh`;
+            document.getElementById('schema-sub2').textContent = `-- kWh`;
+            document.getElementById('schema-net').innerHTML = `-- <span class="text-sm font-normal">kWh</span>`;
+            document.getElementById('spec-main-val').textContent = `-- kWh`;
+            document.getElementById('spec-sub1-val').textContent = `-- kWh`;
+            document.getElementById('spec-sub2-val').textContent = `-- kWh`;
+            document.getElementById('spec-net-val').textContent = `-- kWh`;
           }
         });
     }
@@ -1107,14 +1225,107 @@
         });
     }
 
+    function generateShareText(item) {
+      if (!item) return '';
+      const dateStr = item.effective_date || item.reading_date || (item.created_at ? item.created_at.substring(0, 10) : item.readingDate) || new Date().toISOString().substring(0, 10);
+      const total = formatTL(item.total_bill !== undefined ? item.total_bill : item.totalBill);
+      const cons = formatNumber(item.main_meter !== undefined ? item.main_meter : item.mainMeter);
+      const unit = formatTL(item.unit_price !== undefined ? item.unit_price : item.unitPrice);
+
+      let lAmount, lCons, lPct, kAmount, kCons, kPct, eAmount, eCons, ePct;
+
+      if (item.shops) {
+        const s = {};
+        item.shops.forEach(sh => { s[sh.id] = sh; });
+        lAmount = formatTL(s.lokanta.amount);
+        lCons = formatNumber(s.lokanta.consumption);
+        lPct = formatNumber(s.lokanta.percentage);
+        kAmount = formatTL(s.koltukcu.amount);
+        kCons = formatNumber(s.koltukcu.consumption);
+        kPct = formatNumber(s.koltukcu.percentage);
+        eAmount = formatTL(s.emlak.amount);
+        eCons = formatNumber(s.emlak.consumption);
+        ePct = formatNumber(s.emlak.percentage);
+      } else {
+        const m = item.main_meter || 1;
+        lAmount = formatTL(item.lokanta_amount);
+        lCons = formatNumber(item.lokanta_consumption);
+        lPct = formatNumber((item.lokanta_consumption / m) * 100);
+        kAmount = formatTL(item.koltukcu_amount);
+        kCons = formatNumber(item.koltukcu_consumption);
+        kPct = formatNumber((item.koltukcu_consumption / m) * 100);
+        eAmount = formatTL(item.emlak_amount);
+        eCons = formatNumber(item.emlak_consumption);
+        ePct = formatNumber((item.emlak_consumption / m) * 100);
+      }
+
+      return `⚡ *ELEKTRİK FATURA DAĞILIMI* (${dateStr})\n` +
+             `━━━━━━━━━━━━━━━━━━━━\n` +
+             `📊 *Toplam Fatura:* ${total}\n` +
+             `⚡ *Ana Sayaç:* ${cons} kWh (Birim: ${unit}/kWh)\n\n` +
+             `🍽️ *Lokanta:* ${lAmount} (${lCons} kWh - %${lPct})\n` +
+             `🛋️ *Koltukçu:* ${kAmount} (${kCons} kWh - %${kPct})\n` +
+             `🏢 *Emlak Ofisi:* ${eAmount} (${eCons} kWh - %${ePct})\n` +
+             `━━━━━━━━━━━━━━━━━━━━`;
+    }
+
+    function shareWhatsApp(id) {
+      let item = null;
+      if (id === 'current') {
+        item = lastCalculatedResult;
+      } else if (currentHistoryItems) {
+        item = currentHistoryItems.find(i => i.id == id);
+      }
+      if (!item) {
+        showToast('Paylaşılacak kayıt bulunamadı.');
+        return;
+      }
+
+      const text = encodeURIComponent(generateShareText(item));
+      window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+    }
+
+    function copyShareText(id) {
+      let item = null;
+      if (id === 'current') {
+        item = lastCalculatedResult;
+      } else if (currentHistoryItems) {
+        item = currentHistoryItems.find(i => i.id == id);
+      }
+      if (!item) {
+        showToast('Kopyalanacak kayıt bulunamadı.');
+        return;
+      }
+
+      const text = generateShareText(item);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          showToast('Fatura dökümü panoya kopyalandı.');
+        }).catch(() => fallbackCopyText(text));
+      } else {
+        fallbackCopyText(text);
+      }
+    }
+
+    function fallbackCopyText(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('Fatura dökümü panoya kopyalandı.');
+    }
+
     function loadHistory() {
       fetch('/api/calculations')
         .then(r => r.json())
         .then(items => {
+          currentHistoryItems = items || [];
           const listContainer = document.getElementById('history-list');
-          document.getElementById('history-count').textContent = `${items.length} kayıt bulundu`;
+          document.getElementById('history-count').textContent = `${currentHistoryItems.length} kayıt bulundu`;
           
-          if (!items || items.length === 0) {
+          if (!currentHistoryItems || currentHistoryItems.length === 0) {
             listContainer.innerHTML = `
               <div class="text-center py-10 bg-white border border-outline-variant rounded-xl text-outline text-sm">
                 Henüz kayıtlı fatura bulunmuyor.
@@ -1129,8 +1340,8 @@
           }
 
           let listHtml = '';
-          items.forEach((item, index) => {
-            const dateStr = item.created_at.substring(0, 10);
+          currentHistoryItems.forEach((item, index) => {
+            const dateStr = item.effective_date || item.reading_date || item.created_at.substring(0, 10);
             listHtml += `
               <div onclick="loadHistoryDetail(${item.id})" id="history-card-${item.id}" class="history-item-card bg-white border border-outline-variant p-4 rounded-xl shadow-sm cursor-pointer hover:bg-surface-container-low transition-all ${index === 0 ? 'border-l-4 border-l-primary' : ''}">
                 <div class="flex justify-between items-start">
@@ -1152,7 +1363,7 @@
           listContainer.innerHTML = listHtml;
           
           // Load first item details automatically
-          loadHistoryDetail(items[0].id);
+          loadHistoryDetail(currentHistoryItems[0].id);
         });
     }
 
@@ -1166,142 +1377,146 @@
         selectedCard.classList.add('border-l-4', 'border-l-primary');
       }
 
-      fetch('/api/calculations')
-        .then(r => r.json())
-        .then(items => {
-          const item = items.find(i => i.id == id);
-          if (!item) return;
+      const item = (currentHistoryItems || []).find(i => i.id == id);
+      if (!item) return;
 
-          const panel = document.getElementById('history-detail-panel');
-          const dateStr = item.created_at.substring(0, 10);
-          
-          const lPct = (item.lokanta_consumption / item.main_meter) * 100;
-          const kPct = (item.koltukcu_consumption / item.main_meter) * 100;
-          const ePct = (item.emlak_consumption / item.main_meter) * 100;
+      const panel = document.getElementById('history-detail-panel');
+      const dateStr = item.effective_date || item.reading_date || item.created_at.substring(0, 10);
+      
+      const lPct = (item.lokanta_consumption / item.main_meter) * 100;
+      const kPct = (item.koltukcu_consumption / item.main_meter) * 100;
+      const ePct = (item.emlak_consumption / item.main_meter) * 100;
 
-          let warningsHtml = '';
-          if (item.warnings) {
-            item.warnings.split('|').forEach(w => {
-              if (w.trim()) {
-                warningsHtml += `
-                  <div class="p-2.5 bg-amber-50 text-amber-700 text-xs border border-amber-200 rounded-lg flex items-start gap-1.5">
-                    <span class="material-symbols-outlined text-sm pt-0.5">warning</span>
-                    <span>${w}</span>
-                  </div>
-                `;
-              }
-            });
+      let warningsHtml = '';
+      if (item.warnings) {
+        item.warnings.split('|').forEach(w => {
+          if (w.trim()) {
+            warningsHtml += `
+              <div class="p-2.5 bg-amber-50 text-amber-700 text-xs border border-amber-200 rounded-lg flex items-start gap-1.5">
+                <span class="material-symbols-outlined text-sm pt-0.5">warning</span>
+                <span>${w}</span>
+              </div>
+            `;
           }
-
-          panel.innerHTML = `
-            <div class="bg-white border border-outline-variant rounded-2xl p-6 shadow-sm space-y-6">
-              
-              <!-- Detail Header -->
-              <div class="flex justify-between items-start pb-4 border-b border-outline-variant">
-                <div>
-                  <h3 class="text-lg font-bold text-primary">${dateStr} Fatura Detayları</h3>
-                  <p class="text-xs text-outline mt-0.5">Oluşturulma: ${item.created_at}</p>
-                </div>
-                <button onclick="window.print()" class="border border-outline hover:bg-surface-container text-on-surface-variant px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5">
-                  <span class="material-symbols-outlined text-sm">print</span> Yazdır
-                </button>
-              </div>
-
-              <!-- Stat block -->
-              <div class="grid grid-cols-3 gap-3 text-center">
-                <div class="bg-surface p-3 rounded-xl border border-outline-variant/60">
-                  <span class="block text-[10px] font-bold text-outline">TOPLAM BEDEL</span>
-                  <span class="font-mono text-base font-extrabold text-primary">${formatTL(item.total_bill)}</span>
-                </div>
-                <div class="bg-surface p-3 rounded-xl border border-outline-variant/60">
-                  <span class="block text-[10px] font-bold text-outline">TOPLAM TÜKETİM</span>
-                  <span class="font-mono text-base font-extrabold text-primary">${formatNumber(item.main_meter)} kWh</span>
-                </div>
-                <div class="bg-surface p-3 rounded-xl border border-outline-variant/60">
-                  <span class="block text-[10px] font-bold text-outline">BİRİM FİYAT</span>
-                  <span class="font-mono text-xs font-extrabold text-primary">${formatTL(item.unit_price)}/kWh</span>
-                </div>
-              </div>
-
-              <!-- Warnings -->
-              ${warningsHtml ? `<div class="space-y-2">${warningsHtml}</div>` : ''}
-
-              <!-- Distribution chart -->
-              <div class="space-y-2">
-                <span class="text-xs font-bold text-outline uppercase tracking-wider block">Tüketim Dağılım Payı</span>
-                <div class="h-6 w-full flex rounded-full overflow-hidden bg-surface-container">
-                  <div class="h-full bg-amber-500" style="width: ${lPct}%" title="Lokanta: %${lPct.toFixed(1)}"></div>
-                  <div class="h-full bg-blue-500" style="width: ${kPct}%" title="Koltukcu: %${kPct.toFixed(1)}"></div>
-                  <div class="h-full bg-emerald-500" style="width: ${ePct}%" title="Emlak: %${ePct.toFixed(1)}"></div>
-                </div>
-                <div class="flex justify-between text-[10px] text-outline font-semibold">
-                  <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-amber-500 rounded-sm"></span> Lokanta (%${formatNumber(lPct)})</span>
-                  <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-blue-500 rounded-sm"></span> Koltukçu (%${formatNumber(kPct)})</span>
-                  <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-emerald-500 rounded-sm"></span> Emlak (%${formatNumber(ePct)})</span>
-                </div>
-              </div>
-
-              <!-- Breakdown Lists -->
-              <div class="space-y-3 pt-2">
-                <h4 class="text-sm font-bold text-primary">Dükkan Dökümü</h4>
-                
-                <!-- Lokanta -->
-                <div class="flex items-center justify-between p-3 rounded-xl border border-outline-variant bg-amber-50/10">
-                  <div class="flex items-center gap-3">
-                    <span class="material-symbols-outlined text-amber-500">restaurant</span>
-                    <div>
-                      <span class="text-sm font-bold block">Lokanta</span>
-                      <span class="text-[10px] text-outline">Sayaç: ${formatNumber(item.lokanta_start)} - ${formatNumber(item.lokanta_end)} kWh</span>
-                    </div>
-                  </div>
-                  <div class="text-right">
-                    <span class="font-mono text-sm font-extrabold text-primary block">${formatTL(item.lokanta_amount)}</span>
-                    <span class="text-[10px] text-outline font-semibold">${formatNumber(item.lokanta_consumption)} kWh (%${formatNumber(lPct)})</span>
-                  </div>
-                </div>
-
-                <!-- Koltukcu -->
-                <div class="flex items-center justify-between p-3 rounded-xl border border-outline-variant bg-blue-50/10">
-                  <div class="flex items-center gap-3">
-                    <span class="material-symbols-outlined text-blue-500">chair</span>
-                    <div>
-                      <span class="text-sm font-bold block">Koltukçu</span>
-                      <span class="text-[10px] text-outline">Sayaç: ${formatNumber(item.koltukcu_start)} - ${formatNumber(item.koltukcu_end)} kWh</span>
-                    </div>
-                  </div>
-                  <div class="text-right">
-                    <span class="font-mono text-sm font-extrabold text-primary block">${formatTL(item.koltukcu_amount)}</span>
-                    <span class="text-[10px] text-outline font-semibold">${formatNumber(item.koltukcu_consumption)} kWh (%${formatNumber(kPct)})</span>
-                  </div>
-                </div>
-
-                <!-- Emlak -->
-                <div class="flex items-center justify-between p-3 rounded-xl border border-outline-variant bg-emerald-50/10">
-                  <div class="flex items-center gap-3">
-                    <span class="material-symbols-outlined text-emerald-500">domain</span>
-                    <div>
-                      <span class="text-sm font-bold block">Emlak Ofisi</span>
-                      <span class="text-[10px] text-outline">Matematiksel Fark Hesabı</span>
-                    </div>
-                  </div>
-                  <div class="text-right">
-                    <span class="font-mono text-sm font-extrabold text-primary block">${formatTL(item.emlak_amount)}</span>
-                    <span class="text-[10px] text-outline font-semibold">${formatNumber(item.emlak_consumption)} kWh (%${formatNumber(ePct)})</span>
-                  </div>
-                </div>
-
-              </div>
-
-              <!-- Delete Action -->
-              <div class="pt-4 border-t border-outline-variant/60 flex justify-end">
-                <button onclick="handleDelete(${item.id})" class="text-xs font-bold text-red-600 border border-red-200 bg-red-50 hover:bg-red-100/50 px-4 py-2 rounded-lg flex items-center gap-1">
-                  <span class="material-symbols-outlined text-sm">delete</span> Kaydı Sil
-                </button>
-              </div>
-
-            </div>
-          `;
         });
+      }
+
+      panel.innerHTML = `
+        <div class="print-card bg-white border border-outline-variant rounded-2xl p-6 shadow-sm space-y-6">
+          
+          <!-- Detail Header -->
+          <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 pb-4 border-b border-outline-variant">
+            <div>
+              <h3 class="text-lg font-bold text-primary">${dateStr} Fatura Detayları</h3>
+              <p class="text-xs text-outline mt-0.5">Kayıt: ${item.created_at}</p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button type="button" onclick="shareWhatsApp(${item.id})" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors">
+                <span class="material-symbols-outlined text-sm">chat</span> WhatsApp Paylaş
+              </button>
+              <button type="button" onclick="copyShareText(${item.id})" class="border border-outline hover:bg-surface-container text-on-surface-variant px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors">
+                <span class="material-symbols-outlined text-sm">content_copy</span> Kopyala
+              </button>
+              <button type="button" onclick="window.print()" class="border border-outline hover:bg-surface-container text-on-surface-variant px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors">
+                <span class="material-symbols-outlined text-sm">print</span> Yazdır
+              </button>
+            </div>
+          </div>
+
+          <!-- Stat block -->
+          <div class="grid grid-cols-3 gap-3 text-center">
+            <div class="bg-surface p-3 rounded-xl border border-outline-variant/60">
+              <span class="block text-[10px] font-bold text-outline">TOPLAM BEDEL</span>
+              <span class="font-mono text-base font-extrabold text-primary">${formatTL(item.total_bill)}</span>
+            </div>
+            <div class="bg-surface p-3 rounded-xl border border-outline-variant/60">
+              <span class="block text-[10px] font-bold text-outline">TOPLAM TÜKETİM</span>
+              <span class="font-mono text-base font-extrabold text-primary">${formatNumber(item.main_meter)} kWh</span>
+            </div>
+            <div class="bg-surface p-3 rounded-xl border border-outline-variant/60">
+              <span class="block text-[10px] font-bold text-outline">BİRİM FİYAT</span>
+              <span class="font-mono text-xs font-extrabold text-primary">${formatTL(item.unit_price)}/kWh</span>
+            </div>
+          </div>
+
+          <!-- Warnings -->
+          ${warningsHtml ? `<div class="space-y-2">${warningsHtml}</div>` : ''}
+
+          <!-- Distribution chart -->
+          <div class="space-y-2">
+            <span class="text-xs font-bold text-outline uppercase tracking-wider block">Tüketim Dağılım Payı</span>
+            <div class="h-6 w-full flex rounded-full overflow-hidden bg-surface-container">
+              <div class="h-full bg-amber-500" style="width: ${Math.max(0, Math.min(100, lPct))}%" title="Lokanta: %${lPct.toFixed(1)}"></div>
+              <div class="h-full bg-blue-500" style="width: ${Math.max(0, Math.min(100, kPct))}%" title="Koltukcu: %${kPct.toFixed(1)}"></div>
+              <div class="h-full bg-emerald-500" style="width: ${Math.max(0, Math.min(100, ePct))}%" title="Emlak: %${ePct.toFixed(1)}"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-outline font-semibold">
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-amber-500 rounded-sm"></span> Lokanta (%${formatNumber(lPct)})</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-blue-500 rounded-sm"></span> Koltukçu (%${formatNumber(kPct)})</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-emerald-500 rounded-sm"></span> Emlak (%${formatNumber(ePct)})</span>
+            </div>
+          </div>
+
+          <!-- Breakdown Lists -->
+          <div class="space-y-3 pt-2">
+            <h4 class="text-sm font-bold text-primary">Dükkan Dökümü</h4>
+            
+            <!-- Lokanta -->
+            <div class="flex items-center justify-between p-3 rounded-xl border border-outline-variant bg-amber-50/10">
+              <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-amber-500">restaurant</span>
+                <div>
+                  <span class="text-sm font-bold block">Lokanta</span>
+                  <span class="text-[10px] text-outline">Sayaç: ${formatNumber(item.lokanta_start)} - ${formatNumber(item.lokanta_end)} kWh</span>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="font-mono text-sm font-extrabold text-primary block">${formatTL(item.lokanta_amount)}</span>
+                <span class="text-[10px] text-outline font-semibold">${formatNumber(item.lokanta_consumption)} kWh (%${formatNumber(lPct)})</span>
+              </div>
+            </div>
+
+            <!-- Koltukcu -->
+            <div class="flex items-center justify-between p-3 rounded-xl border border-outline-variant bg-blue-50/10">
+              <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-blue-500">chair</span>
+                <div>
+                  <span class="text-sm font-bold block">Koltukçu</span>
+                  <span class="text-[10px] text-outline">Sayaç: ${formatNumber(item.koltukcu_start)} - ${formatNumber(item.koltukcu_end)} kWh</span>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="font-mono text-sm font-extrabold text-primary block">${formatTL(item.koltukcu_amount)}</span>
+                <span class="text-[10px] text-outline font-semibold">${formatNumber(item.koltukcu_consumption)} kWh (%${formatNumber(kPct)})</span>
+              </div>
+            </div>
+
+            <!-- Emlak -->
+            <div class="flex items-center justify-between p-3 rounded-xl border border-outline-variant bg-emerald-50/10">
+              <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-emerald-500">domain</span>
+                <div>
+                  <span class="text-sm font-bold block">Emlak Ofisi</span>
+                  <span class="text-[10px] text-outline">Matematiksel Fark Hesabı</span>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="font-mono text-sm font-extrabold text-primary block">${formatTL(item.emlak_amount)}</span>
+                <span class="text-[10px] text-outline font-semibold">${formatNumber(item.emlak_consumption)} kWh (%${formatNumber(ePct)})</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Delete Action -->
+          <div class="pt-4 border-t border-outline-variant/60 flex justify-end">
+            <button type="button" onclick="handleDelete(${item.id})" class="text-xs font-bold text-red-600 border border-red-200 bg-red-50 hover:bg-red-100/50 px-4 py-2 rounded-lg flex items-center gap-1 transition-colors">
+              <span class="material-symbols-outlined text-sm">delete</span> Kaydı Sil
+            </button>
+          </div>
+
+        </div>
+      `;
     }
 
     function handleDelete(id) {
@@ -1312,6 +1527,7 @@
             showToast('Hesaplama kaydı başarıyla silindi.');
             loadHistory();
             loadDashboardData();
+            loadMetersData();
           });
       }
     }
@@ -1370,7 +1586,8 @@
         lokantaStart: parseTurkishNumber(lokantaStartEl.value),
         lokantaEnd: parseTurkishNumber(lokantaEndEl.value),
         koltukcuStart: parseTurkishNumber(koltukcuStartEl.value),
-        koltukcuEnd: parseTurkishNumber(koltukcuEndEl.value)
+        koltukcuEnd: parseTurkishNumber(koltukcuEndEl.value),
+        readingDate: (document.getElementById('readingDate').value || new Date().toISOString().substring(0, 10)).trim()
       };
 
       const errors = validateForm(inputs);
@@ -1386,8 +1603,8 @@
       
       errorBox.classList.add('hidden');
 
-      // Post calculation request to server
-      fetch('/api/calculations', {
+      // Post calculation PREVIEW request to server (does not write to database!)
+      fetch('/api/calculate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(inputs)
@@ -1421,9 +1638,9 @@
         document.getElementById('drawer-verify-text').textContent = `Özet Toplam: ${formatTL(sum)} / Fatura: ${formatTL(data.totalBill)}`;
 
         // Progress bars
-        document.getElementById('drawer-bar-l').style.width = `${shops.lokanta.percentage}%`;
-        document.getElementById('drawer-bar-k').style.width = `${shops.koltukcu.percentage}%`;
-        document.getElementById('drawer-bar-e').style.width = `${shops.emlak.percentage}%`;
+        document.getElementById('drawer-bar-l').style.width = `${Math.max(0, Math.min(100, shops.lokanta.percentage))}%`;
+        document.getElementById('drawer-bar-k').style.width = `${Math.max(0, Math.min(100, shops.koltukcu.percentage))}%`;
+        document.getElementById('drawer-bar-e').style.width = `${Math.max(0, Math.min(100, shops.emlak.percentage))}%`;
 
         // Card specs
         document.getElementById('drawer-l-sub').textContent = `Okuma: ${formatNumber(inputs.lokantaStart)} - ${formatNumber(inputs.lokantaEnd)} kWh`;
@@ -1457,10 +1674,49 @@
     }
 
     function handleSave() {
-      // Results already processed by handleCalculate, we save and close drawer
-      showToast('Hesaplama kaydı başarıyla SQLite veritabanına kaydedildi.');
-      closeDrawer();
-      switchView('dashboard');
+      if (!lastCalculatedInputs) {
+        showToast('Kaydedilecek hesaplama bulunamadı.');
+        return;
+      }
+
+      const saveBtn = document.getElementById('btn-drawer-save');
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-1"></span> Kaydediliyor...';
+      }
+
+      // Persist to database via POST /api/calculations
+      fetch('/api/calculations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lastCalculatedInputs)
+      })
+      .then(r => r.json().then(j => ({ status: r.status, body: j })))
+      .then(res => {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<span class="material-symbols-outlined text-base">save</span> Kaydet';
+        }
+
+        if (res.status === 201) {
+          showToast('Hesaplama kaydı başarıyla veritabanına kaydedildi.');
+          closeDrawer();
+          loadDashboardData();
+          loadHistory();
+          loadMetersData();
+          switchView('dashboard');
+        } else {
+          const msg = (res.body.errors && res.body.errors.join(', ')) || 'Kaydetme sırasında hata oluştu.';
+          showToast(msg);
+        }
+      })
+      .catch(() => {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<span class="material-symbols-outlined text-base">save</span> Kaydet';
+        }
+        showToast('Sunucu bağlantısı koptu.');
+      });
     }
 
     function handleReset() {
@@ -1548,6 +1804,10 @@
             if (body.mainMeter) {
               mainMeterEl.value = body.mainMeter.toString().replace('.', ',');
             }
+            if (body.readingDate) {
+              const rDateEl = document.getElementById('readingDate');
+              if (rDateEl) rDateEl.value = body.readingDate;
+            }
             updateLivePreviews();
             showToast('Fatura değerleri başarıyla dolduruldu.');
           } else {
@@ -1567,13 +1827,16 @@
             <span class="material-symbols-outlined text-sm material-symbols-filled">check_circle</span>
             Fatura başarıyla tarandı
           </div>
-          <div class="flex gap-4">
+          <div class="flex flex-wrap gap-3">
       `;
       if (body.totalBill) {
         html += `<div class="bg-white px-3 py-1.5 rounded-lg border border-emerald-100 font-semibold">Tutar: <span class="font-mono font-bold">${formatTL(body.totalBill)}</span></div>`;
       }
       if (body.mainMeter) {
         html += `<div class="bg-white px-3 py-1.5 rounded-lg border border-emerald-100 font-semibold">Tüketim: <span class="font-mono font-bold">${formatNumber(body.mainMeter)} kWh</span></div>`;
+      }
+      if (body.readingDate) {
+        html += `<div class="bg-white px-3 py-1.5 rounded-lg border border-emerald-100 font-semibold">Tarih: <span class="font-mono font-bold">${body.readingDate}</span></div>`;
       }
       html += '</div></div>';
       ocrResultContainer.innerHTML = html;
