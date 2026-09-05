@@ -437,7 +437,7 @@ def extract_from_text(text):
         result["mainMeterContext"] = kwh_context
 
     # -----------------------------------------------------------------------
-    # 3. Fatura Tutarı (TL) Odak: Üst Özet Kutusu ve Net Tutar
+    # 3. Fatura Tutarı (TL) Odak: Doğrudan Fatura Tutarı
     # -----------------------------------------------------------------------
     tl_found = None
     tl_context = None
@@ -455,31 +455,17 @@ def extract_from_text(text):
             tl_found = val
             tl_context = f"Fatura Tutarı Kutusu ({val} TL)"
 
-    # Step 3.2: Fatura Tutarı ve Güncel Yuvarlama (Kuruş Düzeltmesi)
-    # Türk faturalarında alt dökümde "Fatura Tutarı : 5800.51" ve hemen yanında "Güncel Yuvarlama : -0.51" yer alır.
-    # ÖNEMLİ: "Önceki Yuvarlama" (örn. 1.38) KESİNLİKLE eşleştirilmemelidir! Yalnızca "Güncel Yuvarlama(m)" eşleştirilir.
-    # Net ödenecek tutar = 5800.51 + (-0.51) = 5800.00 TL'dir.
+    # Step 3.2: Doğrudan "Fatura Tutarı: X" (yuvarlama veya ekleme/çıkarma yapmadan)
     if tl_found is None:
         for m in re.finditer(r"Fatura\s*Tutar[ıi]\s*[:]?\s*([\d.,]+)", text_clean, re.IGNORECASE):
             raw_num = m.group(1)
             val = parse_money(raw_num)
             if val and 10 < val < 200000:
-                snippet_start = max(0, m.start() - 300)
-                snippet_end = min(len(text_clean), m.end() + 300)
-                snippet = text_clean[snippet_start:snippet_end]
-                # Yalnızca Güncel Yuvarlama / Yuvarlam eşleştirilir
-                m_yuv = re.search(r"G[üu]ncel\s*Yuvarlama?[^\d+-]*([+-]?\s*[\d.,]+)", snippet, re.IGNORECASE)
-                if m_yuv:
-                    yuv_raw = m_yuv.group(1)
-                    is_neg = "-" in yuv_raw
-                    yuv_val = parse_money(yuv_raw.replace("-", "").replace("+", ""))
-                    if yuv_val is not None:
-                        val = round(val - yuv_val if is_neg else val + yuv_val, 2)
                 tl_found = val
-                tl_context = f"Fatura Tutarı Net ({val} TL)"
+                tl_context = f"Fatura Tutarı ({val} TL)"
                 break
 
-    # Step 3.3: Ödenecek Tutar / Toplam Tutar
+    # Step 3.3: Doğrudan "Ödenecek Tutar / Toplam Tutar / Fatura Bedeli: X"
     if tl_found is None:
         for kw in ["ödenecek tutar", "odenecek tutar", "fatura bedeli", "toplam tutar"]:
             m = re.search(rf"{kw}\s*[:]?\s*([\d.,]+)", text_clean, re.IGNORECASE)
