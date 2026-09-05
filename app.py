@@ -443,11 +443,11 @@ def extract_from_text(text):
     tl_context = None
 
     # Step 3.1: Üst özet kutusundaki "Fatura Tutarı ... 5800.00 TL"
-    # Matches "Fatura Tutarı" followed within reasonable distance by an amount with TL/TI/T/1L
+    # Matches "Fatura Tutarı" followed within ~150 chars by an amount with TL/TI/T/1L
     m_box_tl = re.search(
-        r"Fatura\s*Tutar[ıi][^0-9\n]{0,80}(?:\n[^0-9\n]{0,80})*?([\d.,]+)\s*(?:TL|TI|T|1L)\b",
+        r"Fatura\s*Tutar[ıi].{0,150}?([\d.,]+)\s*(?:TL|TI|T|1L)\b",
         text_clean,
-        re.IGNORECASE,
+        re.DOTALL | re.IGNORECASE,
     )
     if m_box_tl:
         val = parse_money(m_box_tl.group(1))
@@ -456,17 +456,19 @@ def extract_from_text(text):
             tl_context = f"Fatura Tutarı Kutusu ({val} TL)"
 
     # Step 3.2: Fatura Tutarı ve Güncel Yuvarlama (Kuruş Düzeltmesi)
-    # Türk faturalarında alt dökümde "Fatura Tutarı : 5800.51" ve hemen üstünde "Güncel Yuvarlama : -0.51" yer alır.
+    # Türk faturalarında alt dökümde "Fatura Tutarı : 5800.51" ve hemen yanında "Güncel Yuvarlama : -0.51" yer alır.
+    # ÖNEMLİ: "Önceki Yuvarlama" (örn. 1.38) KESİNLİKLE eşleştirilmemelidir! Yalnızca "Güncel Yuvarlama(m)" eşleştirilir.
     # Net ödenecek tutar = 5800.51 + (-0.51) = 5800.00 TL'dir.
     if tl_found is None:
         for m in re.finditer(r"Fatura\s*Tutar[ıi]\s*[:]?\s*([\d.,]+)", text_clean, re.IGNORECASE):
             raw_num = m.group(1)
             val = parse_money(raw_num)
             if val and 10 < val < 200000:
-                snippet_start = max(0, m.start() - 250)
-                snippet_end = min(len(text_clean), m.end() + 250)
+                snippet_start = max(0, m.start() - 300)
+                snippet_end = min(len(text_clean), m.end() + 300)
                 snippet = text_clean[snippet_start:snippet_end]
-                m_yuv = re.search(r"(?:G[üu]ncel\s*)?Yuvarlama[^\d+-]*([+-]?\s*[\d.,]+)", snippet, re.IGNORECASE)
+                # Yalnızca Güncel Yuvarlama / Yuvarlam eşleştirilir
+                m_yuv = re.search(r"G[üu]ncel\s*Yuvarlama?[^\d+-]*([+-]?\s*[\d.,]+)", snippet, re.IGNORECASE)
                 if m_yuv:
                     yuv_raw = m_yuv.group(1)
                     is_neg = "-" in yuv_raw
