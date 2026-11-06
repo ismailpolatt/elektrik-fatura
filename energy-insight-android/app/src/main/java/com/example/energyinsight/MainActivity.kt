@@ -12,7 +12,6 @@ import androidx.activity.SystemBarStyle
 import android.graphics.Color
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.example.energyinsight.theme.EnergyInsightTheme
@@ -68,7 +67,7 @@ class MainActivity : ComponentActivity() {
     )
     setContent {
       EnergyInsightTheme { 
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { 
+        Surface(modifier = Modifier.fillMaxSize(), color = androidx.compose.ui.graphics.Color(0xFFF9F9FB)) { 
           MainNavigation() 
         } 
       }
