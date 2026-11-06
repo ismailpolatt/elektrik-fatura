@@ -1,26 +1,22 @@
 package com.example.energyinsight.ui.main
 
+import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithText
-import org.junit.Before
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
+import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import org.junit.Rule
 import org.junit.Test
 
-/** UI tests for [com.example.energyinsight.ui.main.MainScreen]. */
 class MainScreenTest {
-
   @get:Rule val composeTestRule = createAndroidComposeRule<ComponentActivity>()
 
-  @Before
-  fun setup() {
-    composeTestRule.setContent { MainScreen(FAKE_DATA) }
-  }
-
   @Test
-  fun firstItem_exists() {
-    FAKE_DATA.forEach { composeTestRule.onNodeWithText("Hello $it!").assertExists() }
+  fun webView_isVisible() {
+    composeTestRule.setContent { MainScreen() }
+    composeTestRule.waitForIdle()
+    onView(isAssignableFrom(WebView::class.java)).check(matches(isDisplayed()))
   }
 }
-
-private val FAKE_DATA = listOf("Sample1", "Sample2", "Sample3")

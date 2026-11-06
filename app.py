@@ -1,4 +1,7 @@
 import io
+import math
+import uuid
+from decimal import Decimal, ROUND_HALF_UP
 import os
 import re
 import sqlite3
@@ -7,6 +10,7 @@ from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__, static_folder="static", static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_PATH = os.path.join(DB_DIR, "bills.db")
@@ -58,16 +62,56 @@ def init_db():
 # Calculation
 # ---------------------------------------------------------------------------
 
+def parse_input_number(value):
+    """Strict form/API number parser; a single separator is decimal, including .xxx."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            number = float(value)
+        except (ValueError, OverflowError):
+            return None
+        return number if math.isfinite(number) else None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            pattern = r"[+-]?(?:[0-9]{1,3}(?:\.[0-9]{3})+),[0-9]+"
+            clean = text.replace(".", "").replace(",", ".")
+        else:
+            pattern = r"[+-]?(?:[0-9]{1,3}(?:,[0-9]{3})+)\.[0-9]+"
+            clean = text.replace(",", "")
+    elif text.count(",") > 1 or text.count(".") > 1:
+        pattern = r"[+-]?[0-9]{1,3}(?:\.[0-9]{3}){2,}|[+-]?[0-9]{1,3}(?:,[0-9]{3}){2,}"
+        clean = text.replace(",", "").replace(".", "")
+    else:
+        pattern = r"[+-]?[0-9]+(?:[.,][0-9]+)?"
+        clean = text.replace(",", ".")
+    if not re.fullmatch(pattern, text):
+        return None
+    try:
+        number = float(clean)
+    except (ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def safe_float(val, default=None):
-    """Safely convert any value to float, handling Turkish/English number strings."""
-    if val is None:
-        return default
-    if isinstance(val, (int, float)):
-        return float(val)
-    if isinstance(val, str):
-        parsed = parse_number_flex(val)
-        return parsed if parsed is not None else default
-    return default
+    parsed = parse_input_number(val)
+    return parsed if parsed is not None else default
+
+
+def valid_reading_date(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        return False
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
 
 
 def calculate(data):
@@ -76,11 +120,11 @@ def calculate(data):
 
     total_bill = safe_float(data.get("totalBill"))
     main_meter = safe_float(data.get("mainMeter"))
-    lokanta_start = safe_float(data.get("lokantaStart"), 0.0)
-    lokanta_end = safe_float(data.get("lokantaEnd"), 0.0)
-    koltukcu_start = safe_float(data.get("koltukcuStart"), 0.0)
-    koltukcu_end = safe_float(data.get("koltukcuEnd"), 0.0)
-    reading_date = str(data.get("readingDate") or "").strip()
+    lokanta_start = safe_float(data.get("lokantaStart"))
+    lokanta_end = safe_float(data.get("lokantaEnd"))
+    koltukcu_start = safe_float(data.get("koltukcuStart"))
+    koltukcu_end = safe_float(data.get("koltukcuEnd"))
+    reading_date = data.get("readingDate") or datetime.now().strftime("%Y-%m-%d")
 
     errors = []
     warnings = []
@@ -90,34 +134,50 @@ def calculate(data):
     if main_meter is None or main_meter <= 0:
         errors.append("Ana sayaç tüketimi sıfırdan büyük geçerli bir sayı olmalıdır.")
 
+    for label, value in [("Fatura tutarı", total_bill), ("Ana sayaç", main_meter),
+                         ("Lokanta başlangıç", lokanta_start), ("Lokanta bitiş", lokanta_end),
+                         ("Koltukçu başlangıç", koltukcu_start), ("Koltukçu bitiş", koltukcu_end)]:
+        if value is None or value < 0 or value > 1_000_000_000_000:
+            errors.append(f"{label} geçerli, negatif olmayan bir sayı olmalıdır.")
+        elif Decimal(str(value)).as_tuple().exponent < (-2 if label == "Fatura tutarı" else -3):
+            errors.append(f"{label} en fazla {2 if label == 'Fatura tutarı' else 3} ondalık basamak içerebilir.")
+    if not valid_reading_date(reading_date):
+        errors.append("Geçerli bir okuma tarihi giriniz (YYYY-AA-GG).")
     if errors:
         return {"errors": errors}
 
-    lokanta_consumption = round(lokanta_end - lokanta_start, 2)
-    koltukcu_consumption = round(koltukcu_end - koltukcu_start, 2)
-    sub_total = round(lokanta_consumption + koltukcu_consumption, 2)
-    emlak_consumption = round(main_meter - sub_total, 2)
+    lokanta_consumption = round(lokanta_end - lokanta_start, 3)
+    koltukcu_consumption = round(koltukcu_end - koltukcu_start, 3)
+    sub_total = round(lokanta_consumption + koltukcu_consumption, 3)
+    emlak_consumption = round(main_meter - sub_total, 3)
 
     if lokanta_consumption < 0:
-        warnings.append("Lokanta alt sayacında başlangıç değeri bitiş değerinden büyük. Lütfen okumaları kontrol ediniz.")
+        errors.append("Lokanta bitiş endeksi başlangıçtan küçük olamaz.")
     if koltukcu_consumption < 0:
-        warnings.append("Koltukçu alt sayacında başlangıç değeri bitiş değerinden büyük. Lütfen okumaları kontrol ediniz.")
-    if sub_total > main_meter:
-        warnings.append(
-            f"Alt sayaç toplamı ({sub_total:.1f} kWh) ana sayaç tüketimini "
-            f"({main_meter:.1f} kWh) aşmaktadır. Emlak Ofisi tüketimi negatif görünüyor. "
-            f"Okumaları kontrol ediniz."
-        )
+        errors.append("Koltukçu bitiş endeksi başlangıçtan küçük olamaz.")
+    if emlak_consumption < 0:
+        errors.append("Alt sayaç tüketimleri toplamı ana sayaç tüketimini aşamaz.")
+    if errors:
+        return {"errors": errors}
 
     unit_price = round(total_bill / main_meter, 6)
 
     # Calculate amounts
-    lokanta_amount = round((lokanta_consumption / main_meter) * total_bill, 2)
-    koltukcu_amount = round((koltukcu_consumption / main_meter) * total_bill, 2)
-
-    # Kuruş dengesi: Emlak Ofisi arta kalan birim olduğundan,
-    # 3 işletmenin toplamının ana faturaya kuruşu kuruşuna tam eşit olması sağlanır.
-    emlak_amount = round(total_bill - lokanta_amount - koltukcu_amount, 2)
+    bill = Decimal(str(total_bill))
+    meter = Decimal(str(main_meter))
+    cents = Decimal("0.01")
+    lokanta_money = (Decimal(str(lokanta_consumption)) / meter * bill).quantize(cents, rounding=ROUND_HALF_UP)
+    koltukcu_money = (Decimal(str(koltukcu_consumption)) / meter * bill).quantize(cents, rounding=ROUND_HALF_UP)
+    # Very small bills can round both sub-meters up; do not make the residual negative.
+    excess = max(Decimal(0), lokanta_money + koltukcu_money - bill)
+    if excess:
+        if lokanta_money >= koltukcu_money:
+            lokanta_money -= excess
+        else:
+            koltukcu_money -= excess
+    lokanta_amount = float(lokanta_money)
+    koltukcu_amount = float(koltukcu_money)
+    emlak_amount = float(bill - lokanta_money - koltukcu_money)
 
     # Calculate percentages
     lokanta_pct = round((lokanta_consumption / main_meter) * 100, 1)
@@ -514,6 +574,7 @@ def find_blue_marker_region(img):
     marker cluster (e.g. Fatura Tutarı) to the last (e.g. Fatura Detayı).
     Returns (left, top, right, bottom) crop box or None if no markers found.
     """
+    img = img.convert("RGB")
     w, h = img.size
     row_counts = [0] * h
 
@@ -570,9 +631,8 @@ def ocr_image(image_bytes):
     except ImportError:
         return None
 
-    img = Image.open(io.BytesIO(image_bytes))
-    if img.mode in ("RGBA", "P", "LA"):
-        img = img.convert("RGB")
+    from PIL import ImageOps
+    img = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("RGB")
 
     # Focus between blue markers if detected
     marker_box = find_blue_marker_region(img)
@@ -585,7 +645,7 @@ def ocr_image(image_bytes):
         img = img.resize((img.width * scale, img.height * scale), Image.Resampling.LANCZOS)
 
     try:
-        text = pytesseract.image_to_string(img, lang="tur")
+        text = pytesseract.image_to_string(img, lang="tur", timeout=60)
         return text
     except Exception:
         return None
@@ -598,55 +658,25 @@ def ocr_pdf(file_bytes):
     except ImportError:
         return None
 
-    doc = fitz.open(stream=file_bytes, filetype="pdf")
-    if len(doc) == 0:
-        doc.close()
-        return None
-
-    # Try embedded text first (first 2 pages)
-    text_parts = []
-    for i in range(min(2, len(doc))):
-        page = doc[i]
-        t = page.get_text()
-        if t:
-            text_parts.append(t)
-
-    full_text = "\n".join(text_parts).strip()
-
-    # If we got decent text, use it
-    if len(full_text) > 100:
-        doc.close()
-        return full_text
-
-    # Scanned PDF — render first page as image and OCR
-    try:
-        from PIL import Image
-        import pytesseract
-    except ImportError:
-        doc.close()
-        return full_text if full_text else None
-
-    page = doc[0]
-    # Render at 200 DPI for decent OCR quality
-    mat = fitz.Matrix(200 / 72, 200 / 72)
-    pix = page.get_pixmap(matrix=mat)
-    img_bytes = pix.tobytes("png")
-
-    try:
-        img = Image.open(io.BytesIO(img_bytes))
-        if img.mode in ("RGBA", "P", "LA"):
-            img = img.convert("RGB")
-        ocr_text = pytesseract.image_to_string(img, lang="tur")
-        doc.close()
-        return ocr_text if ocr_text else full_text
-    except Exception:
-        doc.close()
-        return full_text if full_text else None
+    with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+        if len(doc) == 0:
+            return None
+        full_text = "\n".join(doc[i].get_text() for i in range(min(2, len(doc)))).strip()
+        if len(full_text) > 100:
+            return full_text
+        page = doc[0]
+        pix = page.get_pixmap(matrix=fitz.Matrix(200 / 72, 200 / 72))
+        return ocr_image(pix.tobytes("png")) or full_text or None
 
 
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
+
+@app.errorhandler(413)
+def upload_too_large(error):
+    return jsonify({"error": "Dosya en fazla 16 MB olabilir."}), 413
+
 
 @app.route("/api/upload", methods=["POST"])
 def upload_and_ocr():
@@ -670,17 +700,21 @@ def upload_and_ocr():
 
     # Save uploaded file for reference
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex
     ext = os.path.splitext(file.filename)[1] or (".pdf" if is_pdf else ".jpg")
     save_path = os.path.join(UPLOAD_DIR, f"{ts}{ext}")
     with open(save_path, "wb") as f:
         f.write(file_bytes)
 
     # OCR
-    if is_pdf:
-        text = ocr_pdf(file_bytes)
-    else:
-        text = ocr_image(file_bytes)
+    try:
+        if is_pdf:
+            text = ocr_pdf(file_bytes)
+        else:
+            text = ocr_image(file_bytes)
+    except Exception:
+        app.logger.exception("Fatura dosyası okunamadı")
+        return jsonify({"error": "Dosya okunamadı. Geçerli bir PDF veya resim seçiniz."}), 422
 
     if text is None:
         return jsonify({"error": "OCR işlemi başarısız. Tesseract OCR kurulu değil veya dosya okunamadı."}), 500
@@ -699,7 +733,7 @@ def upload_and_ocr():
 
 @app.route("/api/calculate", methods=["POST"])
 def calculate_preview():
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data:
         return jsonify({"errors": ["Geçersiz istek. JSON gövdesi bekleniyor."]}), 400
 
@@ -719,7 +753,7 @@ def last_readings():
         SELECT lokanta_end, koltukcu_end, 
                COALESCE(NULLIF(reading_date, ''), SUBSTR(created_at, 1, 10)) AS date 
         FROM calculations 
-        ORDER BY id DESC LIMIT 1
+        ORDER BY COALESCE(NULLIF(reading_date, ''), SUBSTR(created_at, 1, 10)) DESC, id DESC LIMIT 1
         """
     ).fetchone()
     conn.close()
@@ -740,7 +774,7 @@ def list_calculations():
         SELECT *, 
                COALESCE(NULLIF(reading_date, ''), SUBSTR(created_at, 1, 10)) AS effective_date 
         FROM calculations 
-        ORDER BY id DESC
+        ORDER BY effective_date DESC, id DESC
         """
     ).fetchall()
     conn.close()
@@ -767,7 +801,7 @@ def get_calculation(calc_id):
 
 @app.route("/api/calculations", methods=["POST"])
 def create_calculation():
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data:
         return jsonify({"errors": ["Geçersiz istek."]}), 400
 
@@ -776,10 +810,27 @@ def create_calculation():
         return jsonify(result), 400
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    reading_date = str(data.get("readingDate") or now[:10]).strip()
+    reading_date = result["readingDate"]
     shops = {s["id"]: s for s in result["shops"]}
 
     conn = get_db()
+    # Serialize lookup and insertion so concurrent retries cannot create duplicates.
+    conn.execute("BEGIN IMMEDIATE")
+    duplicate = conn.execute(
+        """SELECT id, created_at FROM calculations
+           WHERE total_bill = ? AND main_meter = ?
+             AND lokanta_start = ? AND lokanta_end = ?
+             AND koltukcu_start = ? AND koltukcu_end = ?
+             AND COALESCE(NULLIF(reading_date, ''), SUBSTR(created_at, 1, 10)) = ?
+           LIMIT 1""",
+        (result["totalBill"], result["mainMeter"],
+         safe_float(data.get("lokantaStart")), safe_float(data.get("lokantaEnd")),
+         safe_float(data.get("koltukcuStart")), safe_float(data.get("koltukcuEnd")), reading_date),
+    ).fetchone()
+    if duplicate:
+        conn.close()
+        result.update(id=duplicate["id"], createdAt=duplicate["created_at"], duplicate=True)
+        return jsonify(result), 200
     cursor = conn.execute(
         """
         INSERT INTO calculations
@@ -792,8 +843,8 @@ def create_calculation():
         """,
         (
             result["totalBill"], result["mainMeter"],
-            safe_float(data.get("lokantaStart"), 0.0), safe_float(data.get("lokantaEnd"), 0.0),
-            safe_float(data.get("koltukcuStart"), 0.0), safe_float(data.get("koltukcuEnd"), 0.0),
+            safe_float(data.get("lokantaStart")), safe_float(data.get("lokantaEnd")),
+            safe_float(data.get("koltukcuStart")), safe_float(data.get("koltukcuEnd")),
             shops["lokanta"]["consumption"],
             shops["koltukcu"]["consumption"],
             shops["emlak"]["consumption"],

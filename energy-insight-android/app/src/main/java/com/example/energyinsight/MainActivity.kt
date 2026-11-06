@@ -8,6 +8,8 @@ import android.webkit.ValueCallback
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
+import android.graphics.Color
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -60,7 +62,10 @@ class MainActivity : ComponentActivity() {
         fileChooserLauncher.launch(Intent.createChooser(intent, "Fatura Seç"))
     }
 
-    enableEdgeToEdge()
+    enableEdgeToEdge(
+      statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+      navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+    )
     setContent {
       EnergyInsightTheme { 
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { 

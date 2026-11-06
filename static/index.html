@@ -2,7 +2,7 @@
 <html class="light" lang="tr">
 <head>
   <meta charset="utf-8"/>
-  <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+  <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
   <title>Energy Insight - Süzme Sayaç Takip Sistemi</title>
   
   <!-- Tailwind CSS & Plugins -->
@@ -97,11 +97,36 @@
       border-radius: 10px;
     }
     .calculation-drawer {
+      display: flex;
+      flex-direction: column;
+      max-height: calc(var(--app-height, 700px) - 24px);
+      overflow: hidden;
       transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .hidden-drawer {
       transform: translateY(100%);
+      visibility: hidden;
+      pointer-events: none;
     }
+    .drawer-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 4px 20px 16px;
+    }
+    .drawer-actions {
+      flex: 0 0 auto;
+      display: flex;
+      gap: 16px;
+      background: white;
+      border-top: 1px solid #e2e2e4;
+      padding: 12px 20px calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+    .calculation-drawer > :first-child { flex-shrink: 0; }
+    body.drawer-open { overflow: hidden; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .pb-safe { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
     .nav-active {
       background-color: #ffe16d; /* secondary-fixed */
       color: #221b00; /* on-secondary-fixed */
@@ -729,8 +754,8 @@
             <button type="button" onclick="handleReset()" class="flex-1 bg-white border border-outline text-on-surface-variant py-4 rounded-xl font-bold text-sm hover:bg-surface-container-low transition-colors shadow-sm">
               Temizle
             </button>
-            <button type="button" onclick="handleCalculate()" class="flex-1 bg-primary text-white py-4 rounded-xl font-bold text-sm hover:opacity-90 active:scale-[0.98] transition-all shadow-md shadow-primary/10 flex items-center justify-center gap-2">
-              <span class="material-symbols-outlined">calculate</span> Hesapla
+            <button type="button" id="btn-calculate" onclick="handleCalculate()" class="flex-1 bg-primary text-white py-4 rounded-xl font-bold text-sm hover:opacity-90 active:scale-[0.98] transition-all shadow-md shadow-primary/10 flex items-center justify-center gap-2">
+              <span class="material-symbols-outlined">calculate</span> Hesapla ve Kontrol Et
             </button>
           </div>
 
@@ -773,10 +798,10 @@
   <div id="results-drawer" class="calculation-drawer hidden-drawer fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-3xl shadow-[0_-8px_40px_-12px_rgba(0,0,0,0.3)] max-w-xl mx-auto">
     <div class="w-12 h-1 bg-outline-variant rounded-full mx-auto my-3 cursor-pointer" onclick="closeDrawer()"></div>
     
-    <div class="px-container-padding-mobile pb-6 pt-1 max-h-[85vh] overflow-y-auto custom-scrollbar">
+    <div class="drawer-scroll custom-scrollbar">
       <header class="text-center mb-5">
         <h3 class="text-lg font-bold text-primary">Tüketim Dağılımı Dökümü</h3>
-        <p class="text-xs text-outline mt-0.5">Girilen verilere göre hesaplanan tutarlar</p>
+        <p class="text-xs text-outline mt-0.5">Önizleme: Kontrol edip aşağıdaki Kaydet düğmesine basın.</p>
       </header>
 
       <div class="space-y-5" id="drawer-content-box">
@@ -875,8 +900,9 @@
           </div>
         </div>
 
-        <!-- Action buttons inside drawer -->
-        <div class="flex gap-4 pt-3 border-t border-outline-variant/60">
+      </div>
+    </div>
+    <div class="drawer-actions">
           <button type="button" onclick="closeDrawer()" class="flex-1 border border-primary text-primary py-3.5 rounded-xl font-bold text-sm hover:bg-primary/5 transition-colors">
             Düzenle
           </button>
@@ -884,8 +910,6 @@
             <span class="material-symbols-outlined text-base">save</span> Kaydet
           </button>
         </div>
-      </div>
-    </div>
   </div>
 
   <!-- ========================================== -->
@@ -902,59 +926,55 @@
     // ============================================
 
     function parseTurkishNumber(input) {
-      if (input === null || input === undefined) return NaN;
-      let s = String(input).trim();
-      if (!s) return NaN;
-
-      // Remove any characters other than digits, comma, dot
-      s = s.replace(/[^\d.,]/g, '');
-      if (!s) return NaN;
-
-      const hasComma = s.includes(',');
-      const hasDot = s.includes('.');
-
-      if (hasComma && hasDot) {
-        // The one that appears last is the decimal mark
-        if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
-          // Turkish: 1.500,75
-          s = s.replace(/\./g, '').replace(',', '.');
+      if (input === null || input === undefined || typeof input === 'boolean') return NaN;
+      if (typeof input === 'number') return Number.isFinite(input) ? input : NaN;
+      const text = String(input).trim();
+      let pattern, clean;
+      if (text.includes(',') && text.includes('.')) {
+        if (text.lastIndexOf(',') > text.lastIndexOf('.')) {
+          pattern = /^[+-]?[0-9]{1,3}(?:\.[0-9]{3})+,[0-9]+$/;
+          clean = text.replace(/\./g, '').replace(',', '.');
         } else {
-          // English: 1,500.75
-          s = s.replace(/,/g, '');
+          pattern = /^[+-]?[0-9]{1,3}(?:,[0-9]{3})+\.[0-9]+$/;
+          clean = text.replace(/,/g, '');
         }
-        return parseFloat(s);
+      } else if ((text.match(/,/g) || []).length > 1 || (text.match(/\./g) || []).length > 1) {
+        pattern = /^(?:[+-]?[0-9]{1,3}(?:\.[0-9]{3}){2,}|[+-]?[0-9]{1,3}(?:,[0-9]{3}){2,})$/;
+        clean = text.replace(/[.,]/g, '');
+      } else {
+        pattern = /^[+-]?[0-9]+(?:[.,][0-9]+)?$/;
+        clean = text.replace(',', '.');
       }
+      return pattern.test(text) && Number.isFinite(Number(clean)) ? Number(clean) : NaN;
+    }
 
-      if (hasComma) {
-        if ((s.match(/,/g) || []).length > 1) {
-          // Multiple commas: 1,500,000 -> thousands
-          s = s.replace(/,/g, '');
-        } else {
-          // Single comma in Turkish is always decimal: 150,5 -> 150.5
-          s = s.replace(',', '.');
-        }
-        return parseFloat(s);
+    function localToday() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    }
+
+    function updateViewportHeight() {
+      const height = window.visualViewport?.height || window.innerHeight;
+      if (height > 0) document.documentElement.style.setProperty('--app-height', `${height}px`);
+    }
+    updateViewportHeight();
+    window.addEventListener('resize', updateViewportHeight);
+    window.visualViewport?.addEventListener('resize', updateViewportHeight);
+
+    async function fetchWithTimeout(url, options = {}) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), url === '/api/upload' ? 90000 : 25000);
+      try {
+        return await fetch(url, { ...options, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
       }
+    }
 
-      if (hasDot) {
-        if ((s.match(/\./g) || []).length > 1) {
-          // Multiple dots: 1.500.000 -> thousands
-          s = s.replace(/\./g, '');
-        } else {
-          // Single dot: e.g. 150.5 or 2450.80 or 1.500
-          const parts = s.split('.');
-          const decimals = parts[1] || '';
-          if (decimals.length === 1 || decimals.length === 2 || parts[0] === '0') {
-            // Keep dot as decimal separator
-          } else if (decimals.length === 3 && parts[0].length <= 3) {
-            // Turkish thousands: 1.500 -> 1500
-            s = s.replace('.', '');
-          }
-        }
-        return parseFloat(s);
-      }
-
-      return parseFloat(s);
+    async function readJSONResponse(response) {
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || body.errors?.join(', ') || 'Sunucu isteği tamamlayamadı.');
+      return body;
     }
 
     function formatTL(amount) {
@@ -1102,8 +1122,8 @@
     let currentHistoryItems = [];
 
     function loadDashboardData() {
-      fetch('/api/calculations')
-        .then(r => r.json())
+      fetchWithTimeout('/api/calculations')
+        .then(readJSONResponse)
         .then(items => {
           if (items && items.length > 0) {
             const latest = items[0];
@@ -1174,12 +1194,12 @@
             document.getElementById('dash-card-e-bar').style.width = `0%`;
             document.getElementById('dash-card-e-amount').textContent = "₺0,00";
           }
-        });
+        }).catch(error => showToast(error.message || 'Veriler alınamadı. Bağlantınızı kontrol edin.'));
     }
 
     function loadMetersData() {
-      fetch('/api/calculations')
-        .then(r => r.json())
+      fetchWithTimeout('/api/calculations')
+        .then(readJSONResponse)
         .then(items => {
           if (items && items.length > 0) {
             const latest = items[0];
@@ -1202,32 +1222,36 @@
             document.getElementById('spec-sub2-val').textContent = `-- kWh`;
             document.getElementById('spec-net-val').textContent = `-- kWh`;
           }
-        });
+        }).catch(error => showToast(error.message || 'Veriler alınamadı. Bağlantınızı kontrol edin.'));
     }
 
+    let readingsRequest = 0;
     function fetchLastReadings() {
-      fetch('/api/last-readings')
-        .then(r => r.json())
+      const request = ++readingsRequest;
+      const initial = {lokanta: lokantaStartEl.value, koltukcu: koltukcuStartEl.value};
+      fetchWithTimeout('/api/last-readings')
+        .then(readJSONResponse)
         .then(data => {
-          if (data.lokantaEnd !== undefined) {
+          if (request !== readingsRequest || activeView !== 'new-reading') return;
+          if (data.lokantaEnd !== undefined && !initial.lokanta && !lokantaStartEl.value) {
             lokantaStartEl.value = data.lokantaEnd.toString().replace('.', ',');
             lokantaStartEl.classList.add('bg-emerald-50/50');
             document.getElementById('lokanta-preview').innerHTML =
               `Tüketim: -- kWh <span class="text-[10px] text-emerald-600 block">(Başlangıç ${data.date.substring(0,10)} tarihinden alındı)</span>`;
           }
-          if (data.koltukcuEnd !== undefined) {
+          if (data.koltukcuEnd !== undefined && !initial.koltukcu && !koltukcuStartEl.value) {
             koltukcuStartEl.value = data.koltukcuEnd.toString().replace('.', ',');
             koltukcuStartEl.classList.add('bg-emerald-50/50');
             document.getElementById('koltukcu-preview').innerHTML =
               `Tüketim: -- kWh <span class="text-[10px] text-emerald-600 block">(Başlangıç ${data.date.substring(0,10)} tarihinden alındı)</span>`;
           }
           updateLivePreviews();
-        });
+        }).catch(error => showToast(error.message || 'Veriler alınamadı. Bağlantınızı kontrol edin.'));
     }
 
     function generateShareText(item) {
       if (!item) return '';
-      const dateStr = item.effective_date || item.reading_date || (item.created_at ? item.created_at.substring(0, 10) : item.readingDate) || new Date().toISOString().substring(0, 10);
+      const dateStr = item.effective_date || item.reading_date || (item.created_at ? item.created_at.substring(0, 10) : item.readingDate) || localToday();
       const total = formatTL(item.total_bill !== undefined ? item.total_bill : item.totalBill);
       const cons = formatNumber(item.main_meter !== undefined ? item.main_meter : item.mainMeter);
       const unit = formatTL(item.unit_price !== undefined ? item.unit_price : item.unitPrice);
@@ -1318,8 +1342,8 @@
     }
 
     function loadHistory() {
-      fetch('/api/calculations')
-        .then(r => r.json())
+      fetchWithTimeout('/api/calculations')
+        .then(readJSONResponse)
         .then(items => {
           currentHistoryItems = items || [];
           const listContainer = document.getElementById('history-list');
@@ -1364,7 +1388,7 @@
           
           // Load first item details automatically
           loadHistoryDetail(currentHistoryItems[0].id);
-        });
+        }).catch(error => showToast(error.message || 'Veriler alınamadı. Bağlantınızı kontrol edin.'));
     }
 
     function loadHistoryDetail(id) {
@@ -1521,14 +1545,14 @@
 
     function handleDelete(id) {
       if (confirm('Bu fatura kaydını silmek istediğinize emin misiniz?')) {
-        fetch(`/api/calculations/${id}`, { method: 'DELETE' })
-          .then(r => r.json())
+        fetchWithTimeout(`/api/calculations/${id}`, { method: 'DELETE' })
+          .then(readJSONResponse)
           .then(data => {
             showToast('Hesaplama kaydı başarıyla silindi.');
             loadHistory();
             loadDashboardData();
             loadMetersData();
-          });
+          }).catch(error => showToast(error.message || 'Kayıt silinemedi. Bağlantınızı kontrol edin.'));
       }
     }
 
@@ -1576,10 +1600,19 @@
         errors.push('Sayaç değerleri negatif olamaz.');
       }
 
+      if (d.lokantaEnd < d.lokantaStart) errors.push('Lokanta bitiş endeksi başlangıçtan küçük olamaz.');
+      if (d.koltukcuEnd < d.koltukcuStart) errors.push('Koltukçu bitiş endeksi başlangıçtan küçük olamaz.');
+      if (Math.round(((d.lokantaEnd - d.lokantaStart) + (d.koltukcuEnd - d.koltukcuStart) - d.mainMeter) * 1000) > 0) {
+        errors.push('Alt sayaç tüketimleri toplamı ana sayaç tüketimini aşamaz.');
+      }
       return errors;
     }
 
+    let calculating = false;
     function handleCalculate() {
+      if (calculating || saving) return;
+      lastCalculatedInputs = null;
+      lastCalculatedResult = null;
       const inputs = {
         totalBill: parseTurkishNumber(totalBillEl.value),
         mainMeter: parseTurkishNumber(mainMeterEl.value),
@@ -1587,9 +1620,10 @@
         lokantaEnd: parseTurkishNumber(lokantaEndEl.value),
         koltukcuStart: parseTurkishNumber(koltukcuStartEl.value),
         koltukcuEnd: parseTurkishNumber(koltukcuEndEl.value),
-        readingDate: (document.getElementById('readingDate').value || new Date().toISOString().substring(0, 10)).trim()
+        readingDate: (document.getElementById('readingDate').value || localToday()).trim()
       };
 
+      const inputSnapshot = JSON.stringify([...document.querySelectorAll('#view-new-reading input')].map(el => el.value));
       const errors = validateForm(inputs);
       const errorBox = document.getElementById('validation-errors');
       
@@ -1603,22 +1637,28 @@
       
       errorBox.classList.add('hidden');
 
+      calculating = true;
+      document.getElementById('btn-calculate').disabled = true;
       // Post calculation PREVIEW request to server (does not write to database!)
-      fetch('/api/calculate', {
+      fetchWithTimeout('/api/calculate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(inputs)
       })
       .then(r => r.json().then(j => ({ status: r.status, body: j })))
       .then(res => {
-        if (res.status === 400) {
-          const apiErrors = res.body.errors || ['Hesaplama hatası gerçekleşti.'];
+        if (res.status >= 400) {
+          const apiErrors = res.body.errors || [res.body.error || 'Hesaplama hatası gerçekleşti.'];
           errorBox.className = "p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 space-y-1.5 mt-2";
-          errorBox.innerHTML = apiErrors.map(e => `<div>❌ ${e}</div>`).join('');
+          errorBox.replaceChildren(...apiErrors.map(message => { const row = document.createElement('div'); row.textContent = message; return row; }));
           errorBox.classList.remove('hidden');
           return;
         }
 
+        if (inputSnapshot !== JSON.stringify([...document.querySelectorAll('#view-new-reading input')].map(el => el.value))) {
+          showToast('Form değişti. Güncel değerlerle yeniden hesaplayın.');
+          return;
+        }
         const data = res.body;
         
         // Cache result for final saving confirmation
@@ -1669,16 +1709,22 @@
         openDrawer();
       })
       .catch(() => {
-        showToast('Sunucu bağlantısı koptu. Lütfen daha sonra deneyin.');
+        showToast('Hesaplama tamamlanamadı. Bağlantınızı kontrol edip yeniden deneyin.');
+      }).finally(() => {
+        calculating = false;
+        document.getElementById('btn-calculate').disabled = false;
       });
     }
 
+    let saving = false;
     function handleSave() {
+      if (saving) return;
       if (!lastCalculatedInputs) {
         showToast('Kaydedilecek hesaplama bulunamadı.');
         return;
       }
 
+      saving = true;
       const saveBtn = document.getElementById('btn-drawer-save');
       if (saveBtn) {
         saveBtn.disabled = true;
@@ -1686,20 +1732,22 @@
       }
 
       // Persist to database via POST /api/calculations
-      fetch('/api/calculations', {
+      fetchWithTimeout('/api/calculations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(lastCalculatedInputs)
       })
       .then(r => r.json().then(j => ({ status: r.status, body: j })))
       .then(res => {
+        saving = false;
         if (saveBtn) {
           saveBtn.disabled = false;
           saveBtn.innerHTML = '<span class="material-symbols-outlined text-base">save</span> Kaydet';
         }
 
-        if (res.status === 201) {
-          showToast('Hesaplama kaydı başarıyla veritabanına kaydedildi.');
+        if (res.status === 201 || res.status === 200) {
+          handleReset();
+          showToast(res.body.duplicate ? 'Bu fatura zaten kayıtlı; tekrar eklenmedi.' : 'Fatura başarıyla kaydedildi.');
           closeDrawer();
           loadDashboardData();
           loadHistory();
@@ -1711,6 +1759,7 @@
         }
       })
       .catch(() => {
+        saving = false;
         if (saveBtn) {
           saveBtn.disabled = false;
           saveBtn.innerHTML = '<span class="material-symbols-outlined text-base">save</span> Kaydet';
@@ -1720,6 +1769,9 @@
     }
 
     function handleReset() {
+      lastCalculatedInputs = null;
+      lastCalculatedResult = null;
+      document.getElementById('readingDate').value = localToday();
       const inputs = [totalBillEl, mainMeterEl, lokantaStartEl, lokantaEndEl, koltukcuStartEl, koltukcuEndEl];
       inputs.forEach(el => {
         el.value = '';
@@ -1735,6 +1787,10 @@
     // ============================================
     
     function openDrawer() {
+      document.activeElement?.blur();
+      updateViewportHeight();
+      document.body.classList.add('drawer-open');
+      document.querySelector('.drawer-scroll').scrollTop = 0;
       document.getElementById('results-drawer').classList.remove('hidden-drawer');
       const overlay = document.getElementById('overlay');
       overlay.classList.remove('hidden');
@@ -1742,7 +1798,21 @@
       setTimeout(() => overlay.classList.add('opacity-100'), 10);
     }
 
+    function handleNativeBack() {
+      if (!document.getElementById('results-drawer').classList.contains('hidden-drawer')) {
+        closeDrawer();
+        return true;
+      }
+      if (activeView !== 'dashboard') {
+        switchView('dashboard');
+        return true;
+      }
+      return false;
+    }
+
     function closeDrawer() {
+      if (saving) return;
+      document.body.classList.remove('drawer-open');
       document.getElementById('results-drawer').classList.add('hidden-drawer');
       const overlay = document.getElementById('overlay');
       overlay.classList.remove('opacity-100');
@@ -1785,13 +1855,14 @@
         return;
       }
 
+      if (file.size > 16 * 1024 * 1024) { renderOcrError('Dosya en fazla 16 MB olabilir.'); return; }
       uploadStatus.classList.remove('hidden');
       ocrResultContainer.innerHTML = '';
 
       const formData = new FormData();
       formData.append('file', file);
 
-      fetch('/api/upload', { method: 'POST', body: formData })
+      fetchWithTimeout('/api/upload', { method: 'POST', body: formData })
         .then(r => r.json().then(j => ({ status: r.status, body: j })))
         .then(res => {
           uploadStatus.classList.add('hidden');
@@ -1856,18 +1927,23 @@
     // ============================================
 
     // Set Default reading date picker to today
-    document.getElementById('readingDate').value = new Date().toISOString().substring(0, 10);
+    document.getElementById('readingDate').value = localToday();
 
     // Bind events
     const allInputs = [totalBillEl, mainMeterEl, lokantaStartEl, lokantaEndEl, koltukcuStartEl, koltukcuEndEl];
     allInputs.forEach(el => {
-      el.addEventListener('input', updateLivePreviews);
+      el.addEventListener('input', () => { lastCalculatedInputs = null; lastCalculatedResult = null; updateLivePreviews(); });
       el.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           handleCalculate();
         }
       });
+    });
+
+    document.getElementById('readingDate').addEventListener('input', () => {
+      lastCalculatedInputs = null;
+      lastCalculatedResult = null;
     });
 
     // Start with Dashboard
